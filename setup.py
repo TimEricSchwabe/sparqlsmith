@@ -6,12 +6,12 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="sparqlsmith",
     version="0.1.0",
-    author="Your Name",
-    author_email="your.email@example.com",
-    description="A Python library for crafting and manipulating SPARQL queries with precision",
+    author="Tim Schwabe",
+    author_email="tim.schwabe@tum.de",
+    description="A Python library for crafting, manipulating and analyzing SPARQL queries",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/sparqlsmith",
+    url="https://github.com/TimEricSchwabe/sparqlsmith",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",

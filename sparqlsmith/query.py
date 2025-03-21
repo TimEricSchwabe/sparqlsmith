@@ -129,8 +129,8 @@ class SPARQLQuery:
         """
         Instantiate variables in the query using the provided mapping dictionary.
 
-        This method modifies the TriplePattern objects in-place and adjusts the projection variables
-        based on the target number of projection variables.
+        This method modifies the TriplePattern objects in-place and removes instantiated variables
+        from the projection variables list.
 
         Parameters
         ----------
@@ -144,15 +144,17 @@ class SPARQLQuery:
         """
         self._instantiate_clause(self.where_clause, mapping_dict)
 
-        # After instantiation, adjust projection variables
-        all_vars = self.get_all_variables()
-        num_vars = len(all_vars)
-
-        n_target_projection_vars = random.randint(1, num_vars)
-        if n_target_projection_vars == num_vars:
-            self.projection_variables = list(all_vars)
-        else:
-            self.projection_variables = random.sample(sorted(all_vars), n_target_projection_vars)
+        # After instantiation, remove instantiated variables from projection variables
+        if self.projection_variables != ['*']:
+            # Keep only variables that were not instantiated
+            self.projection_variables = [
+                var for var in self.projection_variables 
+                if var.startswith('?') and var[1:] not in mapping_dict
+            ]
+            
+            # If all projection variables were instantiated, get all remaining variables
+            if not self.projection_variables:
+                self.projection_variables = list(self.get_all_variables())
 
         return self
 
