@@ -71,6 +71,29 @@ query2 = SPARQLQuery(
 print(query1.is_isomorphic(query2)) # True
 ```
 
+Instantiating variables in a query
+```python
+bgp = BGP([
+    TriplePattern('?s', '?p1', '?o1'),
+    TriplePattern('?s', '?p2', '?o2'),
+    TriplePattern('?o1', '?p3', '?o3'),
+])
+
+query1 = SPARQLQuery(
+    projection_variables=['?s', '?o1', '?o3'],
+    where_clause=bgp
+)
+    mapping = {
+    'p1': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
+    'p2': 'http://example.org/predicate2',
+    'o2': 'http://example.org/object2',
+}
+
+# Create a copy of the query and instantiate it
+query.instantiate(mapping)
+```
+
+
 ## Features
 
 - Craft SPARQL queries with precision and elegance
