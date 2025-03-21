@@ -1,6 +1,6 @@
 # SPARQLsmith
 
-A Python library for crafting, parsing, editing and analyzing SPARQL queries programmatically.
+A Python library for crafting, parsing, editing and analyzing SPARQL queries programmatically. .
 
 ## Installation
 
@@ -12,7 +12,7 @@ pip install sparqlsmith
 
 ## Quick Start
 
-Here's a simple example of how to use SPARQLsmith:
+Building Queries programmatically
 
 ```python
 from sparqlsmith import SPARQLQuery, BGP, TriplePattern, UnionOperator, Filter
@@ -50,24 +50,41 @@ sparql_query = query.to_query_string()
 print(sparql_query)
 ```
 
+Checking if queries are isomorphic
+```python
+query1 = SPARQLQuery(
+    projection_variables=['*'],
+    where_clause=UnionOperator(
+        left=BGP([TriplePattern('?s', ':type', ':Person')]),
+        right=BGP([TriplePattern('?s', ':type', ':Organization')])
+    )
+)
+
+query2 = SPARQLQuery(
+    projection_variables=['*'],
+    where_clause=UnionOperator(
+        left=BGP([TriplePattern('?x', ':type', ':Organization')]),
+        right=BGP([TriplePattern('?x', ':type', ':Person')])
+    )
+)
+
+print(query1.is_isomorphic(query2)) # True
+```
+
 ## Features
 
 - Craft SPARQL queries with precision and elegance
-- Comprehensive support for:
+-  Support for:
   - Basic Graph Patterns (BGP)
   - UNION operations
   - OPTIONAL patterns
   - Filters
   - Subqueries
   - ORDER BY clauses
-- Intelligent query isomorphism checking
-- Sophisticated triple pattern extraction
-- Clean query string generation
-- Built-in query validation and optimization
+- query isomorphism checking
+- Get query characteristics
+- query string generation from query object
 
-## Documentation
-
-For full documentation, visit [docs/](docs/).
 
 ## Development
 
@@ -77,10 +94,6 @@ To set up the development environment:
 # Clone the repository
 git clone https://github.com/yourusername/sparqlsmith.git
 cd sparqlsmith
-
-# Create a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install development dependencies
 pip install -e ".[dev]"
