@@ -531,6 +531,81 @@ class SPARQLQuery:
     def _compare_optionals(self, opt1: OptionalOperator, opt2: OptionalOperator, variable_mapping) -> bool:
         return self._compare_clauses(opt1.bgp, opt2.bgp, variable_mapping)
 
+    def print_structure(self, indent=0):
+        """
+        Print the hierarchical structure of the query.
+        
+        Parameters
+        ----------
+        indent : int, optional
+            The initial indentation level (default is 0).
+        """
+        prefix = "  " * indent
+        print(f"{prefix}SPARQLQuery:")
+        print(f"{prefix}  Projection: {', '.join(self.projection_variables)}")
+        
+        if self.graph:
+            print(f"{prefix}  Graph: {self.graph}")
+        
+        if self.filters:
+            print(f"{prefix}  Filters:")
+            for filter in self.filters:
+                print(f"{prefix}    {filter.expression}")
+        
+        if self.order_by:
+            direction = "ASC" if self.order_by.ascending else "DESC"
+            print(f"{prefix}  OrderBy: {direction} {', '.join(self.order_by.variables)}")
+        
+        if self.limit is not None:
+            print(f"{prefix}  Limit: {self.limit}")
+        
+        if self.offset is not None:
+            print(f"{prefix}  Offset: {self.offset}")
+        
+        print(f"{prefix}  Where Clause:")
+        self._print_clause(self.where_clause, indent + 2)
+    
+    def _print_clause(self, clause, indent=0):
+        """
+        Print a clause in the query structure.
+        
+        Parameters
+        ----------
+        clause : Union[BGP, UnionOperator, OptionalOperator, SubQuery, List]
+            The clause to print.
+        indent : int, optional
+            The indentation level (default is 0).
+        """
+        prefix = "  " * indent
+        
+        if isinstance(clause, BGP):
+            print(f"{prefix}BGP:")
+            for triple in clause.triples:
+                print(f"{prefix}  Triple: {triple.subject} {triple.predicate} {triple.object}")
+        
+        elif isinstance(clause, UnionOperator):
+            print(f"{prefix}UNION:")
+            print(f"{prefix}  Left:")
+            self._print_clause(clause.left, indent + 2)
+            print(f"{prefix}  Right:")
+            self._print_clause(clause.right, indent + 2)
+        
+        elif isinstance(clause, OptionalOperator):
+            print(f"{prefix}OPTIONAL:")
+            self._print_clause(clause.bgp, indent + 1)
+        
+        elif isinstance(clause, SubQuery):
+            print(f"{prefix}SUBQUERY:")
+            clause.query.print_structure(indent + 1)
+        
+        elif isinstance(clause, list):
+            for i, subquery in enumerate(clause):
+                print(f"{prefix}Item {i+1}:")
+                self._print_clause(subquery, indent + 1)
+        
+        else:
+            print(f"{prefix}Unknown clause type: {type(clause)}")
+
 
 def extract_triple_patterns(sparql_query: SPARQLQuery) -> List[TriplePattern]:
     """

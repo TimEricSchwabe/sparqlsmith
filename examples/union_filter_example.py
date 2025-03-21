@@ -45,6 +45,12 @@ def main():
     print("----------------------")
     print(query.to_query_string())
 
+    print("----------------------")
+    
+
+    # Printing the query object
+    query.print_structure()
+
 
 if __name__ == '__main__':
     main() 
