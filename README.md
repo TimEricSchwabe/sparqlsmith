@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="SPARQLsmith Logo" width="300"/>
+</p>
+
 # SPARQLsmith
 
 A Python library for crafting, parsing, editing and analyzing SPARQL queries programmatically. .
@@ -96,22 +100,22 @@ query.instantiate(mapping)
 Analyzing Query Features
 
 ```python
-    bgp = BGP([
-        TriplePattern('?s', '?p1', '?o1'),
-        TriplePattern('?s', '?p2', '?o2'),
-        TriplePattern('?o1', '?p3', '?o3'),
-    ])
-    
-    query = SPARQLQuery(
-        projection_variables=['?s', '?o1', '?o3'],
-        where_clause=bgp
-    )
+bgp = BGP([
+    TriplePattern('?s', '?p1', '?o1'),
+    TriplePattern('?s', '?p2', '?o2'),
+    TriplePattern('?o1', '?p3', '?o3'),
+])
+
+query = SPARQLQuery(
+    projection_variables=['?s', '?o1', '?o3'],
+    where_clause=bgp
+)
 
 
-    print(query.n_triple_patterns) # print the number of triple patterns in the query
-    print(query.count_bgps()) # print the number of bgps in the query
-    print(query.get_all_variables()) # print all variables in the query 
-    print(query1.projection_variables) # print all variables that are projected
+print(query.n_triple_patterns) # print the number of triple patterns in the query
+print(query.count_bgps()) # print the number of bgps in the query
+print(query.get_all_variables()) # print all variables in the query 
+print(query1.projection_variables) # print all variables that are projected
 
 ```
 
