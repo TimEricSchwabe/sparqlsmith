@@ -12,6 +12,8 @@ from .query import (
     get_combined_query,
 )
 
+from .parser import SPARQLParser
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -26,4 +28,5 @@ __all__ = [
     "extract_triple_patterns",
     "check_if_triple_all_variables",
     "get_combined_query",
+    "SPARQLParser",
 ] 

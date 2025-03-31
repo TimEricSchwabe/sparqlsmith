@@ -4,14 +4,43 @@
 
 # SPARQLsmith
 
-A Python library for crafting, parsing, editing and analyzing SPARQL queries programmatically. .
+A Python library for crafting, parsing, editing and analyzing SPARQL queries programmatically.
+
+## ⚠️ Disclaimer: Early Alpha Stage
+
+**Please note**: SPARQLSmith is currently in early alpha stage. There might be bugs, incomplete features, and API changes in future releases.
+
+**SPARQL 1.1 Support Limitations**: Currently, SPARQLSmith only supports a subset of SPARQL 1.1 features focused primarily on SELECT queries. The following features are **not yet implemented**:
+
+- Logical operators (&&, ||) in FILTER expressions
+- Aggregations (GROUP BY, HAVING)
+- Aggregation functions (COUNT, SUM, MIN, MAX, AVG, etc.)
+- BIND expressions
+- Property paths
+- VALUES clauses
+- CONSTRUCT, ASK, and DESCRIBE query forms
+- Named graphs (FROM, FROM NAMED)
+- SERVICE for federated queries
+- Sub-queries in complex forms
+- OFFSET and LIMIT clauses (partially supported)
+- Support for Turtle syntax in queries
+
+We're actively working on expanding the supported feature set. Contributions are welcome!
 
 ## Installation
 
-You can install the package via pip:
+You can install the package directly from GitHub:
 
 ```bash
-pip install sparqlsmith
+pip install git+https://github.com/TimEricSchwabe/sparqlsmith.git
+```
+
+For development purposes, you can clone the repository and install it in editable mode:
+
+```bash
+git clone https://github.com/magbak/sparqlsmith.git
+cd sparqlsmith
+pip install -e .
 ```
 
 ## Quick Start
@@ -111,7 +140,6 @@ query = SPARQLQuery(
     where_clause=bgp
 )
 
-
 print(query.n_triple_patterns) # print the number of triple patterns in the query
 print(query.count_bgps()) # print the number of bgps in the query
 print(query.get_all_variables()) # print all variables in the query 
@@ -119,6 +147,28 @@ print(query1.projection_variables) # print all variables that are projected
 
 ```
 
+Parsing SPARQL Queries
+
+```python
+from sparqlsmith import SPARQLParser
+
+# Create a parser instance
+parser = SPARQLParser()
+
+# Example SPARQL query string
+query_str = """
+    SELECT ?person ?name 
+    WHERE { 
+        ?person :name ?name .
+        ?person :age ?age .
+        FILTER(?age > 25)
+    }
+"""
+
+
+# Parse the query string to a SPARQLQuery object
+query = parser.parse_to_query(query_str)
+```
 
 ## Features
 
@@ -133,7 +183,6 @@ print(query1.projection_variables) # print all variables that are projected
 - query isomorphism checking
 - Get query characteristics
 - query string generation from query object
-
 
 ## Development
 
