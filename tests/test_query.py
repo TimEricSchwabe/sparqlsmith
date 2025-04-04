@@ -7,6 +7,7 @@ from sparqlsmith import (
     OptionalOperator,
     extract_triple_patterns
 )
+from sparqlsmith.parser import SPARQLParser
 
 class TestSPARQLQuery(unittest.TestCase):
     def test_query_isomorphism_simple_bgp(self):
@@ -118,6 +119,214 @@ class TestSPARQLQuery(unittest.TestCase):
             self.assertEqual(tp.subject, expected_tp.subject)
             self.assertEqual(tp.predicate, expected_tp.predicate)
             self.assertEqual(tp.object, expected_tp.object)
+
+    def test_distinct_query_serialization(self):
+        """Test that the is_distinct parameter affects the query string output correctly"""
+        # Create a query with is_distinct=True
+        bgp = BGP([TriplePattern('?s', '?p', '?o')])
+        query = SPARQLQuery(
+            projection_variables=['?s', '?p', '?o'],
+            where_clause=bgp,
+            is_distinct=True
+        )
+        
+        # Check query string contains DISTINCT
+        query_str = query.to_query_string()
+        self.assertIn("SELECT DISTINCT", query_str)
+        
+        # Create a query with is_distinct=False
+        query = SPARQLQuery(
+            projection_variables=['?s', '?p', '?o'],
+            where_clause=bgp,
+            is_distinct=False
+        )
+        
+        # Check query string does not contain DISTINCT
+        query_str = query.to_query_string()
+        self.assertNotIn("DISTINCT", query_str)
+        
+        # Check that distinct flag is preserved when creating copy
+        query = SPARQLQuery(
+            projection_variables=['?s', '?p', '?o'],
+            where_clause=bgp,
+            is_distinct=True
+        )
+        query_copy = query.copy()
+        self.assertTrue(query_copy.is_distinct)
+        
+        # Test with copy while overriding the is_distinct parameter
+        query_copy = query.copy(is_distinct=False)
+        self.assertFalse(query_copy.is_distinct)
+
+class TestSPARQLParser(unittest.TestCase):
+    def setUp(self):
+        self.parser = SPARQLParser()
+        
+    def _parse_and_verify(self, query_str):
+        """Helper method to parse a query and do basic verification"""
+        result = self.parser.parse(query_str)
+        query_obj = self.parser.structured_dict_to_query(result)
+        
+        # Verify that the query can be converted back to a string
+        query_str_result = query_obj.to_query_string()
+        self.assertIsInstance(query_str_result, str)
+        
+            
+        return query_obj
+        
+    def test_simple_select_query(self):
+        """Test parsing of a simple SELECT query with two triple patterns"""
+        query_str = """
+            SELECT * 
+            WHERE { 
+                ?person :name ?name .
+                ?person :age ?age .
+            }
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Check basic properties
+        self.assertEqual(query_obj.projection_variables, ['*'])
+        
+        # Verify the where clause contains 2 triple patterns
+        self.assertIsInstance(query_obj.where_clause, BGP)
+        self.assertEqual(len(query_obj.where_clause.triples), 2)
+        
+    def test_union_query(self):
+        """Test parsing of a UNION query"""
+        query_str = "SELECT ?s ?p ?o WHERE { { ?s ?p ?o . } UNION { ?o ?p ?s . } }"
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Check that the where clause is a UnionOperator
+        self.assertIsInstance(query_obj.where_clause, UnionOperator)
+        
+        # Verify both sides of the UNION
+        self.assertIsInstance(query_obj.where_clause.left, BGP)
+        self.assertIsInstance(query_obj.where_clause.right, BGP)
+        
+        self.assertEqual(len(query_obj.where_clause.left.triples), 1)
+        self.assertEqual(len(query_obj.where_clause.right.triples), 1)
+        
+    def test_optional_query(self):
+        """Test parsing of a query with OPTIONAL pattern"""
+        query_str = "SELECT ?s ?p ?o WHERE { ?s ?p ?o . OPTIONAL { ?o ?p ?x . } }"
+        query_obj = self._parse_and_verify(query_str)
+        
+        # For queries with multiple patterns, we expect a list in where_clause
+        self.assertIsInstance(query_obj.where_clause, list)
+        self.assertEqual(len(query_obj.where_clause), 2)
+        
+        # First element should be a BGP
+        self.assertIsInstance(query_obj.where_clause[0], BGP)
+        
+        # Second element should be an OptionalOperator
+        self.assertIsInstance(query_obj.where_clause[1], OptionalOperator)
+        
+    def test_filter_query(self):
+        """Test parsing of a query with FILTER"""
+        query_str = "SELECT ?s ?p ?o WHERE { ?s ?p ?o . FILTER(?o > 5) }"
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Verify the filter exists
+        self.assertIsNotNone(query_obj.filters)
+        self.assertEqual(len(query_obj.filters), 1)
+        self.assertEqual(query_obj.filters[0].expression, "?o > 5")
+        
+    def test_nested_query(self):
+        """Test parsing of a nested query with braces"""
+        query_str = "SELECT ?s ?p ?o WHERE { { { ?s ?p ?o . } } }"
+        query_obj = self._parse_and_verify(query_str)
+        
+        # The nested structure should be flattened to a simple BGP
+        self.assertIsInstance(query_obj.where_clause, BGP)
+        self.assertEqual(len(query_obj.where_clause.triples), 1)
+        
+    def test_complex_query(self):
+        """Test parsing of a complex query with DISTINCT, FILTER, OPTIONAL, and UNION"""
+        query_str = """
+            SELECT DISTINCT ?person ?name 
+            WHERE { 
+                ?person :name ?name .
+                ?person :age ?age .
+                FILTER(?age > 25)
+                OPTIONAL { ?person :email ?email . }
+                { ?person :likes ?hobby . } UNION { ?hobby :likedBy ?person . }
+            }
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Check projection variables
+        self.assertEqual(query_obj.projection_variables, ['?person', '?name'])
+        
+        # Verify DISTINCT flag
+        self.assertTrue(query_obj.is_distinct)
+        
+        # Check filter
+        self.assertIsNotNone(query_obj.filters)
+        self.assertEqual(len(query_obj.filters), 1)
+        self.assertEqual(query_obj.filters[0].expression, "?age > 25")
+        
+        # The where clause should be a list of patterns
+        self.assertIsInstance(query_obj.where_clause, list)
+        
+        # Find and verify the UNION structure
+        union_element = None
+        for element in query_obj.where_clause:
+            if isinstance(element, UnionOperator):
+                union_element = element
+                break
+                
+        self.assertIsNotNone(union_element)
+        self.assertIsInstance(union_element.left, BGP)
+        self.assertIsInstance(union_element.right, BGP)
+        
+    def test_nested_union_query(self):
+        """Test parsing of a query with nested UNION patterns"""
+        query_str = """SELECT ?s ?p ?o
+        WHERE { ?x ?p ?o.
+            { ?s ?p ?o . } UNION { ?o ?p ?s . }
+        }"""
+        query_obj = self._parse_and_verify(query_str)
+        
+        # For queries with multiple patterns, we expect a list in where_clause
+        self.assertIsInstance(query_obj.where_clause, list)
+        
+        # Find and verify the BGP and UNION
+        has_bgp = False
+        has_union = False
+        
+        for element in query_obj.where_clause:
+            if isinstance(element, BGP):
+                has_bgp = True
+            elif isinstance(element, UnionOperator):
+                has_union = True
+                
+        self.assertTrue(has_bgp)
+        self.assertTrue(has_union)
+
+    def test_distinct_query_parsing(self):
+        """Test parsing of DISTINCT queries"""
+        # Query with DISTINCT
+        query_str = "SELECT DISTINCT ?s ?p ?o WHERE { ?s ?p ?o . }"
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Confirm projection variables
+        self.assertEqual(query_obj.projection_variables, ['?s', '?p', '?o'])
+        
+        # Check serialization
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("SELECT DISTINCT", query_str_result)
+        
+        # Query without DISTINCT
+        query_str = "SELECT ?s ?p ?o WHERE { ?s ?p ?o . }"
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Confirm distinct flag is not set
+        self.assertFalse(query_obj.is_distinct)
+        
+        # Check serialization doesn't have DISTINCT
+        query_str_result = query_obj.to_query_string()
+        self.assertNotIn("DISTINCT", query_str_result)
 
 
 if __name__ == '__main__':
