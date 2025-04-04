@@ -35,14 +35,6 @@ You can install the package directly from GitHub:
 pip install git+https://github.com/TimEricSchwabe/sparqlsmith.git
 ```
 
-For development purposes, you can clone the repository and install it in editable mode:
-
-```bash
-git clone https://github.com/magbak/sparqlsmith.git
-cd sparqlsmith
-pip install -e .
-```
-
 ## Quick Start
 
 Building Queries programmatically

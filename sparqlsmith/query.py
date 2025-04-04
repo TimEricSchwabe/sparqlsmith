@@ -112,7 +112,8 @@ class SPARQLQuery:
             limit: Optional[int] = None,
             offset: Optional[int] = None,
             graph: Optional[str] = None,
-            is_count_query: bool = False
+            is_count_query: bool = False,
+            is_distinct: bool = False
     ):
 
         self.projection_variables = projection_variables if projection_variables is not None else ['*']
@@ -123,6 +124,7 @@ class SPARQLQuery:
         self.offset = offset
         self.graph = graph
         self.is_count_query = is_count_query
+        self.is_distinct = is_distinct
         self.n_triple_patterns = self._count_triple_patterns(where_clause)
 
     def instantiate(self, mapping_dict: Dict[str, str]) -> 'SPARQLQuery':
@@ -259,7 +261,8 @@ class SPARQLQuery:
         if self.is_count_query:
             query = "SELECT (COUNT(*) AS ?count)\n"
         else:
-            query = f"SELECT {' '.join(self.projection_variables)}\n"
+            distinct = "DISTINCT " if self.is_distinct else ""
+            query = f"SELECT {distinct}{' '.join(self.projection_variables)}\n"
         if self.graph:
             query += f"FROM <{self.graph}>\n"
         query += "WHERE {\n"
@@ -542,7 +545,9 @@ class SPARQLQuery:
         """
         prefix = "  " * indent
         print(f"{prefix}SPARQLQuery:")
-        print(f"{prefix}  Projection: {', '.join(self.projection_variables)}")
+        
+        distinct_str = "DISTINCT " if self.is_distinct else ""
+        print(f"{prefix}  Projection: {distinct_str}{', '.join(self.projection_variables)}")
         
         if self.graph:
             print(f"{prefix}  Graph: {self.graph}")
@@ -564,7 +569,7 @@ class SPARQLQuery:
         
         print(f"{prefix}  Where Clause:")
         self._print_clause(self.where_clause, indent + 2)
-    
+
     def _print_clause(self, clause, indent=0):
         """
         Print a clause in the query structure.

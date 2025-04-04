@@ -50,6 +50,7 @@ if __name__ == "__main__":
     
     test_query("SELECT ?s ?p ?o WHERE { { ?s ?p ?o . } UNION { ?o ?p ?s . } }")
 
+
     test_query("SELECT ?s ?p ?o WHERE { ?s ?p ?o . OPTIONAL { ?o ?p ?x . } }")
 
     # test with filter

@@ -493,18 +493,12 @@ class SPARQLParser:
         # Build the where clause
         where_clause = self._build_where_clause(structured_dict)
         
-        # For projected variables, if we have DISTINCT but it's not in the projection variables,
-        # create a new list with "DISTINCT" at the beginning
-        if is_distinct and projection_variables != ['*']:
-            # Add DISTINCT indicator if needed
-            distinct_vars = projection_variables.copy()
-            # Add distinct setting to query params instead
-        
         # Create and return the SPARQLQuery
         return SPARQLQuery(
             projection_variables=projection_variables,
             where_clause=where_clause,
-            filters=filters if filters else None
+            filters=filters if filters else None,
+            is_distinct=is_distinct
         )
     
     def _build_where_clause(self, structured_dict: Dict) -> Union[BGP, UnionOperator, OptionalOperator, SubQuery, List]:
