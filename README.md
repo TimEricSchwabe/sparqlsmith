@@ -5,7 +5,6 @@
 # SPARQLsmith
 
 [![Tests](https://github.com/TimEricSchwabe/sparqlsmith/workflows/Tests/badge.svg)](https://github.com/TimEricSchwabe/sparqlsmith/actions)
-[![codecov](https://codecov.io/gh/TimEricSchwabe/sparqlsmith/branch/master/graph/badge.svg)](https://codecov.io/gh/TimEricSchwabe/sparqlsmith)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A Python library for crafting, parsing, editing and analyzing SPARQL queries programmatically.

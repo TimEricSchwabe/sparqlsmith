@@ -2,10 +2,14 @@
 
 from sparqlsmith.parser import SPARQLParser
 import logging
+import pyparsing
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
+
+# Enable debug
+pyparsing.enable_all_warnings()
 
 def test_query(query_str):
 
@@ -45,7 +49,29 @@ if __name__ == "__main__":
             ?person :name ?name .
             ?person :age ?age .
         }
+        ORDER BY ?age
     """)
+
+    test_query("""
+        SELECT * 
+        WHERE { 
+            ?person :name ?name .
+            ?person :age ?age .
+        }
+        ORDER BY DESC(?age)
+    """)
+    
+    test_query("""
+        SELECT * 
+        WHERE { 
+            ?person :name ?name .
+            ?person :age ?age .
+            ?person :email ?email .
+        }
+        ORDER BY DESC(?age) ASC(?email) DESC(?name)
+    """)
+
+    exit()
 
     
     test_query("SELECT ?s ?p ?o WHERE { { ?s ?p ?o . } UNION { ?o ?p ?s . } }")

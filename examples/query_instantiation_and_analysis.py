@@ -15,6 +15,7 @@ def main():
     
     query1 = SPARQLQuery(
         projection_variables=['?s', '?o1', '?o3'],
+        is_distinct=True,
         where_clause=bgp1
     )
 

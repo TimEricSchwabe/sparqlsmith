@@ -328,6 +328,62 @@ class TestSPARQLParser(unittest.TestCase):
         query_str_result = query_obj.to_query_string()
         self.assertNotIn("DISTINCT", query_str_result)
 
+    def test_simple_order_by(self):
+        """Test parsing of a query with simple ORDER BY clause"""
+        query_str = """
+            SELECT ?person ?name ?age 
+            WHERE { 
+                ?person :name ?name .
+                ?person :age ?age .
+            }
+            ORDER BY ?age
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Verify the order_by attribute exists
+        self.assertIsNotNone(query_obj.order_by)
+        
+        # Check the variables and direction
+        self.assertEqual(query_obj.order_by.variables, ['?age'])
+        
+        # Check the direction is ascending (default)
+        if isinstance(query_obj.order_by.ascending, bool):
+            self.assertTrue(query_obj.order_by.ascending)
+        else:
+            self.assertEqual(query_obj.order_by.ascending, [True])
+        
+        # Check the serialized query contains the ORDER BY
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("ORDER BY ASC(?age)", query_str_result)
+
+    def test_complex_order_by_with_directions(self):
+        """Test parsing of a query with complex ORDER BY clause with mixed directions"""
+        query_str = """
+            SELECT ?person ?name ?age ?email
+            WHERE { 
+                ?person :name ?name .
+                ?person :age ?age .
+                ?person :email ?email .
+            }
+            ORDER BY ?name DESC(?age) ASC(?email)
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Verify the order_by attribute exists
+        self.assertIsNotNone(query_obj.order_by)
+        
+        # Check the variables are in the correct order
+        self.assertEqual(query_obj.order_by.variables, ['?name', '?age', '?email'])
+        
+        # Check the directions are correct (True for ASC, False for DESC)
+        self.assertEqual(query_obj.order_by.ascending, [True, False, True])
+        
+        # Check the serialized query contains the ORDER BY with correct directions
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("ORDER BY", query_str_result)
+        self.assertIn("ASC(?name)", query_str_result)
+        self.assertIn("DESC(?age)", query_str_result)
+        self.assertIn("ASC(?email)", query_str_result)
 
 if __name__ == '__main__':
     unittest.main() 

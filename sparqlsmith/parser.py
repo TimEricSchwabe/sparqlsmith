@@ -173,8 +173,34 @@ class SPARQLParser:
             (select_all | select_vars)
         ).setResultsName('select')
         
+        # Define a variable that could be in parentheses
+        var_in_parens = Group(
+            Suppress(Literal('(')) + 
+            variable +
+            Suppress(Literal(')'))
+        ).setResultsName('var_in_parens')
+        
+        # Define a plain variable term for ORDER BY
+        plain_var_term = variable.copy().setResultsName('var')
+        
+        # Define a directional term (ASC/DESC)
+        direction_term = (
+            (Literal('ASC') | Literal('DESC')).setResultsName('direction') +
+            var_in_parens
+        )
+        
+        # An order by term can be either a plain variable or a direction term
+        order_by_term = (direction_term | plain_var_term)
+        
+        # ORDER BY clause accepts one or more order by terms
+        order_by_clause = (
+            Suppress(Literal('ORDER')) + 
+            Suppress(Literal('BY')) + 
+            OneOrMore(order_by_term)
+        ).setResultsName('order_by')
+        
         # 16. Complete SPARQL query
-        query = select_clause + where_clause
+        query = select_clause + where_clause + Optional(order_by_clause)
         
         # Save grammar elements as instance variables
         self.variable = variable
@@ -189,6 +215,7 @@ class SPARQLParser:
         self.union_pattern = union_pattern
         self.where_clause = where_clause
         self.select_clause = select_clause
+        self.order_by_clause = order_by_clause
         self.query = query
     
     def parse(self, query_string: str) -> Dict:
@@ -236,6 +263,7 @@ class SPARQLParser:
 
             select_dict = {}
             patterns = []
+            order_by_dict = {}
             
             # Handle SELECT clause
             if 'select' in named_keys:
@@ -249,6 +277,39 @@ class SPARQLParser:
                 # Check if DISTINCT was specified
                 if 'distinct' in result and result.distinct:
                     select_dict['distinct'] = True
+            
+            # Handle ORDER BY clause
+            if 'order_by' in named_keys:
+                order_by_vars = []
+                ascending_flags = []
+                
+                # Handle multiple order by terms
+                i = 0
+                while i < len(result.order_by):
+                    term = result.order_by[i]
+                    
+                    # Case 1: Plain variable (e.g., ?age)
+                    if isinstance(term, str) and term.startswith('?'):
+                        order_by_vars.append(term)
+                        ascending_flags.append(True)  # Default is ascending
+                        i += 1
+                    
+                    # Case 2: Direction + variable in parentheses (e.g., DESC(?age))
+                    elif term in ['ASC', 'DESC'] and i+1 < len(result.order_by):
+                        direction = term
+                        # Get the variable from the nested ParseResults
+                        var_list = result.order_by[i+1]
+                        if len(var_list) > 0:
+                            var = var_list[0]
+                            order_by_vars.append(var)
+                            ascending_flags.append(direction != 'DESC')
+                        i += 2  # Skip the direction and variable group
+                    else:
+                        # Skip unrecognized terms
+                        i += 1
+                
+                order_by_dict['variables'] = order_by_vars
+                order_by_dict['ascending'] = ascending_flags
             
             # If we have braced/optional/union/filter etc., preserve their order
             if len(named_keys) > 1:
@@ -290,8 +351,11 @@ class SPARQLParser:
                             filter_dict['expression'] = self._format_filter_expression(result.filter[0])
                         patterns.append({'filter': filter_dict})
                 
-                # Return the ordered patterns
-                return {'patterns': patterns, 'select': select_dict}
+                # Return the ordered patterns with select and order_by
+                result_dict = {'patterns': patterns, 'select': select_dict}
+                if order_by_dict:
+                    result_dict['order_by'] = order_by_dict
+                return result_dict
             
             # Single component case - process as before
             result_dict = {}
@@ -337,6 +401,14 @@ class SPARQLParser:
                 else:
                     # Regular group processing
                     result_dict['group'] = braced_result
+            
+            # Add select clause if we have it
+            if select_dict:
+                result_dict['select'] = select_dict
+                
+            # Add order_by clause if we have it
+            if order_by_dict:
+                result_dict['order_by'] = order_by_dict
             
             # Return the result dict if we found any named components
             if result_dict:
@@ -490,6 +562,22 @@ class SPARQLParser:
                 if 'filter' in pattern:
                     filters.append(Filter(pattern['filter']['expression']))
         
+        # Extract ORDER BY
+        order_by = None
+        if 'order_by' in structured_dict:
+            variables = structured_dict['order_by']['variables']
+            
+            # Check if we have a list of ascending flags or a single value
+            if 'ascending' in structured_dict['order_by']:
+                ascending = structured_dict['order_by']['ascending']
+                
+                # If we have a single ascending flag but multiple variables
+                if isinstance(ascending, bool) and len(variables) > 1:
+                    # Apply the same direction to all variables
+                    ascending = [ascending] * len(variables)
+                    
+                order_by = OrderBy(variables=variables, ascending=ascending)
+        
         # Build the where clause
         where_clause = self._build_where_clause(structured_dict)
         
@@ -498,6 +586,7 @@ class SPARQLParser:
             projection_variables=projection_variables,
             where_clause=where_clause,
             filters=filters if filters else None,
+            order_by=order_by,
             is_distinct=is_distinct
         )
     
@@ -643,4 +732,19 @@ class SPARQLParser:
             A SPARQLQuery object representing the query.
         """
         structured_dict = self.parse(query_string)
-        return self.structured_dict_to_query(structured_dict) 
+        return self.structured_dict_to_query(structured_dict)
+
+def debug_parse_results(result, level=0):
+    """Print the structure of parse results for debugging."""
+    indent = "  " * level
+    if isinstance(result, ParseResults):
+        print(f"{indent}ParseResults({len(result)})")
+        if hasattr(result, 'keys'):
+            for key in result.keys():
+                print(f"{indent}  Key: {key}")
+                debug_parse_results(result[key], level + 2)
+        for i, item in enumerate(result):
+            print(f"{indent}  Item {i}:")
+            debug_parse_results(item, level + 2)
+    else:
+        print(f"{indent}Value: {result}") 

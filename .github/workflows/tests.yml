@@ -24,9 +24,10 @@ jobs:
         pip install -e .
     - name: Run tests
       run: |
-        pytest tests/ --cov=sparqlsmith
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: false 
+        pytest tests/ --cov=sparqlsmith --cov-report=term
+    # Remove the Codecov upload step if you don't want to use it
+    # - name: Upload coverage to Codecov
+    #   uses: codecov/codecov-action@v3
+    #   with:
+    #     token: ${{ secrets.CODECOV_TOKEN }}
+    #     fail_ci_if_error: false 

@@ -94,8 +94,7 @@ class Filter:
 @dataclass
 class OrderBy:
     variables: List[str]
-    ascending: bool = True
-
+    ascending: Union[bool, List[bool]] = True
 
 @dataclass
 class SubQuery:
@@ -272,8 +271,26 @@ class SPARQLQuery:
                 query += f"  FILTER({filter.expression})\n"
         query += "}"
         if self.order_by:
-            direction = "ASC" if self.order_by.ascending else "DESC"
-            query += f"\nORDER BY {direction}({' '.join(self.order_by.variables)})"
+            query += "\nORDER BY "
+            terms = []
+            
+            # Handle either a single boolean or a list of booleans
+            if isinstance(self.order_by.ascending, bool):
+                # Same direction for all variables
+                direction = "ASC" if self.order_by.ascending else "DESC"
+                for var in self.order_by.variables:
+                    terms.append(f"{direction}({var})")
+            else:
+                # Different directions per variable
+                for i, var in enumerate(self.order_by.variables):
+                    if i < len(self.order_by.ascending):
+                        direction = "ASC" if self.order_by.ascending[i] else "DESC"
+                        terms.append(f"{direction}({var})")
+                    else:
+                        # Default to ASC if we run out of direction flags
+                        terms.append(f"ASC({var})")
+            
+            query += " ".join(terms)
         if self.limit is not None:
             query += f"\nLIMIT {self.limit}"
         if self.offset is not None:
@@ -558,8 +575,24 @@ class SPARQLQuery:
                 print(f"{prefix}    {filter.expression}")
         
         if self.order_by:
-            direction = "ASC" if self.order_by.ascending else "DESC"
-            print(f"{prefix}  OrderBy: {direction} {', '.join(self.order_by.variables)}")
+            print(f"{prefix}  OrderBy:", end=" ")
+            
+            # Handle both single direction and per-variable directions
+            if isinstance(self.order_by.ascending, bool):
+                # Same direction for all variables
+                direction = "ASC" if self.order_by.ascending else "DESC"
+                print(f"{direction} {', '.join(self.order_by.variables)}")
+            else:
+                # Different directions per variable
+                order_terms = []
+                for i, var in enumerate(self.order_by.variables):
+                    if i < len(self.order_by.ascending):
+                        direction = "ASC" if self.order_by.ascending[i] else "DESC"
+                        order_terms.append(f"{direction}({var})")
+                    else:
+                        # Default to ASC if we run out of direction flags
+                        order_terms.append(f"ASC({var})")
+                print(", ".join(order_terms))
         
         if self.limit is not None:
             print(f"{prefix}  Limit: {self.limit}")
