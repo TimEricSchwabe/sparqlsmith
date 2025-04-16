@@ -16,8 +16,8 @@ A Python library for crafting, parsing, editing and analyzing SPARQL queries pro
 **SPARQL 1.1 Support Limitations**: Currently, SPARQLSmith only supports a subset of SPARQL 1.1 features focused primarily on SELECT queries. The following features are **not yet implemented**:
 
 - Logical operators (&&, ||) in FILTER expressions
-- Aggregations (GROUP BY, HAVING)
-- Aggregation functions (COUNT, SUM, MIN, MAX, AVG, etc.)
+- ~~Aggregations (GROUP BY, HAVING)~~
+- ~~Aggregation functions (COUNT, SUM, MIN, MAX, AVG, etc.)~~
 - BIND expressions
 - Property paths
 - VALUES clauses
@@ -140,6 +140,8 @@ print(query.count_bgps()) # print the number of bgps in the query
 print(query.get_all_variables()) # print all variables in the query 
 print(query1.projection_variables) # print all variables that are projected
 
+# Print the structure of the query
+print(query) 
 ```
 
 Parsing SPARQL Queries
@@ -167,7 +169,6 @@ query = parser.parse_to_query(query_str)
 
 ## Features
 
-- Craft SPARQL queries with precision and elegance
 -  Support for:
   - Basic Graph Patterns (BGP)
   - UNION operations
@@ -175,9 +176,11 @@ query = parser.parse_to_query(query_str)
   - Filters
   - Subqueries
   - ORDER BY clauses
-- query isomorphism checking
+  - GROUP BY clauses
+  - Aggregation functions (COUNT, SUM, MIN, MAX, AVG)
+- Query isomorphism checking
 - Get query characteristics
-- query string generation from query object
+- Query string generation from query object
 
 ## Development
 
@@ -204,4 +207,49 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. 
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Examples
+
+### Using Aggregation Functions
+
+```python
+from sparqlsmith import SPARQLQuery, BGP, TriplePattern, AggregationExpression, GroupBy
+
+# Create a query with aggregation functions
+bgp = BGP([
+    TriplePattern('?person', ':age', '?age'),
+    TriplePattern('?person', ':salary', '?salary')
+])
+
+# Create aggregation expressions
+count_agg = AggregationExpression(
+    function='COUNT',
+    variable='?person',
+    alias='?count',
+    distinct=True
+)
+
+sum_agg = AggregationExpression(
+    function='SUM',
+    variable='?salary',
+    alias='?totalSalary'
+)
+
+query = SPARQLQuery(
+    projection_variables=['?age'],
+    where_clause=bgp,
+    group_by=GroupBy(variables=['?age']),
+    aggregations=[count_agg, sum_agg]
+)
+
+# Generate SPARQL query string
+sparql_query = query.to_query_string()
+print(sparql_query)
+# Output:
+# SELECT ?age (COUNT(DISTINCT ?person) AS ?count) (SUM(?salary) AS ?totalSalary)
+# WHERE {
+#   ?person :age ?age .
+#   ?person :salary ?salary .
+# }
+# GROUP BY ?age 

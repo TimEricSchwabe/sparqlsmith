@@ -8,6 +8,8 @@ from sparqlsmith import (
     extract_triple_patterns
 )
 from sparqlsmith.parser import SPARQLParser
+from sparqlsmith.errors import OrderByValidationError
+from sparqlsmith.query import AggregationExpression
 
 class TestSPARQLQuery(unittest.TestCase):
     def test_query_isomorphism_simple_bgp(self):
@@ -407,6 +409,88 @@ class TestSPARQLParser(unittest.TestCase):
         # Check the serialized query contains the GROUP BY
         query_str_result = query_obj.to_query_string()
         self.assertIn("GROUP BY ?age", query_str_result)
+
+    def test_aggregate_functions(self):
+        """Test parsing of a query with aggregation functions in SELECT"""
+        query_str = """
+            SELECT ?age (COUNT(?person) AS ?count) (SUM(?salary) AS ?totalSalary)
+            WHERE { 
+                ?person :name ?name .
+                ?person :age ?age .
+                ?person :salary ?salary .
+            }
+            GROUP BY ?age
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Verify regular projection variables
+        self.assertIn("?age", query_obj.projection_variables)
+        
+        # Verify aggregations exist
+        self.assertIsNotNone(query_obj.aggregations)
+        self.assertEqual(len(query_obj.aggregations), 2)
+        
+        # Check COUNT aggregation
+        count_agg = next((agg for agg in query_obj.aggregations if agg.function == "COUNT"), None)
+        self.assertIsNotNone(count_agg)
+        self.assertEqual(count_agg.variable, "?person")
+        self.assertEqual(count_agg.alias, "?count")
+        
+        # Check SUM aggregation
+        sum_agg = next((agg for agg in query_obj.aggregations if agg.function == "SUM"), None)
+        self.assertIsNotNone(sum_agg)
+        self.assertEqual(sum_agg.variable, "?salary")
+        self.assertEqual(sum_agg.alias, "?totalSalary")
+        
+        # Check serialization
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("(COUNT(?person) AS ?count)", query_str_result)
+        self.assertIn("(SUM(?salary) AS ?totalSalary)", query_str_result)
+        self.assertIn("GROUP BY ?age", query_str_result)
+
+        
+    def test_aggregate_with_distinct(self):
+        """Test parsing of aggregate function with DISTINCT"""
+        query_str = """
+            SELECT (COUNT(DISTINCT ?person) AS ?uniqueCount)
+            WHERE { 
+                ?person :name ?name .
+            }
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Verify aggregation exists and has DISTINCT flag
+        self.assertEqual(len(query_obj.aggregations), 1)
+        agg = query_obj.aggregations[0]
+        self.assertEqual(agg.function, "COUNT")
+        self.assertEqual(agg.variable, "?person")
+        self.assertEqual(agg.alias, "?uniqueCount")
+        self.assertTrue(agg.distinct)
+        
+        # Check serialization
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("(COUNT(DISTINCT ?person) AS ?uniqueCount)", query_str_result)
+        
+    def test_count_star_aggregation(self):
+        """Test parsing of COUNT(*) aggregation"""
+        query_str = """
+            SELECT (COUNT(*) AS ?total)
+            WHERE { 
+                ?person :name ?name .
+            }
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Verify COUNT(*) aggregation
+        self.assertEqual(len(query_obj.aggregations), 1)
+        agg = query_obj.aggregations[0]
+        self.assertEqual(agg.function, "COUNT")
+        self.assertEqual(agg.variable, "*")
+        self.assertEqual(agg.alias, "?total")
+        
+        # Check serialization
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("(COUNT(*) AS ?total)", query_str_result)
 
 if __name__ == '__main__':
     unittest.main() 

@@ -44,10 +44,11 @@ def test_query(query_str):
 
 if __name__ == "__main__":
     test_query("""
-            SELECT ?age
+            SELECT DISTINCT ?age (COUNT(?person) AS ?count)
             WHERE { 
                 ?person :name ?name .
                 ?person :age ?age .
+                ?person :salary ?salary .
             }
             GROUP BY ?age
         """

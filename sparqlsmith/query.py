@@ -107,6 +107,28 @@ class SubQuery:
     query: 'SPARQLQuery'
 
 
+@dataclass
+class AggregationExpression:
+    """
+    A class to represent an aggregation expression in a SPARQL query.
+    
+    Attributes
+    ----------
+    function : str
+        The aggregation function (COUNT, SUM, MIN, MAX, AVG)
+    variable : str
+        The variable or expression to aggregate
+    alias : str
+        The variable name assigned to the result (after AS)
+    distinct : bool
+        Whether the DISTINCT keyword is used in the aggregation
+    """
+    function: str  # COUNT, SUM, MIN, MAX, AVG
+    variable: str  # Variable or expression to aggregate
+    alias: str     # Result variable name (after AS)
+    distinct: bool = False
+
+
 class SPARQLQuery:
     def __init__(
             self,
@@ -118,8 +140,8 @@ class SPARQLQuery:
             limit: Optional[int] = None,
             offset: Optional[int] = None,
             graph: Optional[str] = None,
-            is_count_query: bool = False,
-            is_distinct: bool = False
+            is_distinct: bool = False,
+            aggregations: List[AggregationExpression] = None
     ):
 
         self.projection_variables = projection_variables if projection_variables is not None else ['*']
@@ -130,8 +152,8 @@ class SPARQLQuery:
         self.limit = limit
         self.offset = offset
         self.graph = graph
-        self.is_count_query = is_count_query
         self.is_distinct = is_distinct
+        self.aggregations = aggregations if aggregations is not None else []
         self.n_triple_patterns = self._count_triple_patterns(where_clause)
 
     def instantiate(self, mapping_dict: Dict[str, str]) -> 'SPARQLQuery':
@@ -265,11 +287,30 @@ class SPARQLQuery:
         str
             The SPARQL query string.
         """
-        if self.is_count_query:
-            query = "SELECT (COUNT(*) AS ?count)\n"
+        distinct = "DISTINCT " if self.is_distinct else ""
+        
+        # Handle projection with aggregations
+        if self.aggregations:
+            projection_parts = []
+            # Add regular variables
+            if self.projection_variables != ['*']:
+                projection_parts.extend(self.projection_variables)
+            
+            # Add aggregation expressions
+            for agg in self.aggregations:
+                distinct_keyword = "DISTINCT " if agg.distinct else ""
+                if agg.variable == "*" and agg.function == "COUNT":
+                    agg_expr = f"({agg.function}({distinct_keyword}*) AS {agg.alias})"
+                else:
+                    agg_expr = f"({agg.function}({distinct_keyword}{agg.variable}) AS {agg.alias})"
+                projection_parts.append(agg_expr)
+            
+            projection_str = " ".join(projection_parts)
         else:
-            distinct = "DISTINCT " if self.is_distinct else ""
-            query = f"SELECT {distinct}{' '.join(self.projection_variables)}\n"
+            projection_str = " ".join(self.projection_variables)
+            
+        query = f"SELECT {distinct}{projection_str}\n"
+        
         if self.graph:
             query += f"FROM <{self.graph}>\n"
         query += "WHERE {\n"
@@ -565,40 +606,61 @@ class SPARQLQuery:
     def _compare_optionals(self, opt1: OptionalOperator, opt2: OptionalOperator, variable_mapping) -> bool:
         return self._compare_clauses(opt1.bgp, opt2.bgp, variable_mapping)
 
-    def print_structure(self, indent=0):
+    def __str__(self) -> str:
         """
-        Print the hierarchical structure of the query.
+        Return a string representation of the query structure.
         
-        Parameters
-        ----------
-        indent : int, optional
-            The initial indentation level (default is 0).
+        Returns
+        -------
+        str
+            The string representation of the query structure.
         """
-        prefix = "  " * indent
-        print(f"{prefix}SPARQLQuery:")
+        result = []
+        result.append("SPARQLQuery:")
         
+        # Print projection variables
         distinct_str = "DISTINCT " if self.is_distinct else ""
-        print(f"{prefix}  Projection: {distinct_str}{', '.join(self.projection_variables)}")
         
+        projection_parts = []
+        # Add regular variables
+        if self.projection_variables != ['*']:
+            projection_parts.append(f"{distinct_str}{', '.join(self.projection_variables)}")
+        else:
+            projection_parts.append(f"{distinct_str}*")
+        
+        # Add aggregation expressions if present
+        if self.aggregations:
+            agg_strs = []
+            for agg in self.aggregations:
+                distinct_keyword = "DISTINCT " if agg.distinct else ""
+                if agg.variable == "*" and agg.function == "COUNT":
+                    agg_strs.append(f"({agg.function}({distinct_keyword}*) AS {agg.alias})")
+                else:
+                    agg_strs.append(f"({agg.function}({distinct_keyword}{agg.variable}) AS {agg.alias})")
+            projection_parts.append(", ".join(agg_strs))
+        
+        result.append(f"  Projection: {' '.join(projection_parts)}")
+        
+        # Print other parts of the query
         if self.graph:
-            print(f"{prefix}  Graph: {self.graph}")
+            result.append(f"  Graph: {self.graph}")
         
         if self.filters:
-            print(f"{prefix}  Filters:")
+            result.append(f"  Filters:")
             for filter in self.filters:
-                print(f"{prefix}    {filter.expression}")
+                result.append(f"    {filter.expression}")
         
         if self.group_by:
-            print(f"{prefix}  GroupBy: {', '.join(self.group_by.variables)}")
+            result.append(f"  GroupBy: {', '.join(self.group_by.variables)}")
         
         if self.order_by:
-            print(f"{prefix}  OrderBy:", end=" ")
+            result.append(f"  OrderBy:")
             
-            # Handle both single direction and per-variable directions
+            # Handle either a single boolean or a list of booleans
             if isinstance(self.order_by.ascending, bool):
                 # Same direction for all variables
                 direction = "ASC" if self.order_by.ascending else "DESC"
-                print(f"{direction} {', '.join(self.order_by.variables)}")
+                result.append(f"    {direction} {', '.join(self.order_by.variables)}")
             else:
                 # Different directions per variable
                 order_terms = []
@@ -609,57 +671,89 @@ class SPARQLQuery:
                     else:
                         # Default to ASC if we run out of direction flags
                         order_terms.append(f"ASC({var})")
-                print(", ".join(order_terms))
+                result.append(f"    {', '.join(order_terms)}")
         
         if self.limit is not None:
-            print(f"{prefix}  Limit: {self.limit}")
+            result.append(f"  Limit: {self.limit}")
         
         if self.offset is not None:
-            print(f"{prefix}  Offset: {self.offset}")
+            result.append(f"  Offset: {self.offset}")
         
-        print(f"{prefix}  Where Clause:")
-        self._print_clause(self.where_clause, indent + 2)
-
-    def _print_clause(self, clause, indent=0):
+        result.append(f"  Where Clause:")
+        
+        # Use the existing _print_clause logic but capture the output
+        clause_lines = self._str_clause(self.where_clause)
+        for line in clause_lines:
+            result.append(f"  {line}")
+        
+        return "\n".join(result)
+    
+    def _str_clause(self, clause, indent=2) -> List[str]:
         """
-        Print a clause in the query structure.
+        Generate string representation of a clause in the query structure.
         
         Parameters
         ----------
         clause : Union[BGP, UnionOperator, OptionalOperator, SubQuery, List]
-            The clause to print.
+            The clause to stringify.
         indent : int, optional
-            The indentation level (default is 0).
+            The indentation level (default is 2).
+            
+        Returns
+        -------
+        List[str]
+            List of lines representing the clause.
         """
-        prefix = "  " * indent
+        result = []
+        prefix = " " * indent
         
         if isinstance(clause, BGP):
-            print(f"{prefix}BGP:")
+            result.append(f"{prefix}BGP:")
             for triple in clause.triples:
-                print(f"{prefix}  Triple: {triple.subject} {triple.predicate} {triple.object}")
+                result.append(f"{prefix}  Triple: {triple.subject} {triple.predicate} {triple.object}")
         
         elif isinstance(clause, UnionOperator):
-            print(f"{prefix}UNION:")
-            print(f"{prefix}  Left:")
-            self._print_clause(clause.left, indent + 2)
-            print(f"{prefix}  Right:")
-            self._print_clause(clause.right, indent + 2)
+            result.append(f"{prefix}UNION:")
+            result.append(f"{prefix}  Left:")
+            left_lines = self._str_clause(clause.left, indent + 4)
+            result.extend(left_lines)
+            result.append(f"{prefix}  Right:")
+            right_lines = self._str_clause(clause.right, indent + 4)
+            result.extend(right_lines)
         
         elif isinstance(clause, OptionalOperator):
-            print(f"{prefix}OPTIONAL:")
-            self._print_clause(clause.bgp, indent + 1)
+            result.append(f"{prefix}OPTIONAL:")
+            optional_lines = self._str_clause(clause.bgp, indent + 2)
+            result.extend(optional_lines)
         
         elif isinstance(clause, SubQuery):
-            print(f"{prefix}SUBQUERY:")
-            clause.query.print_structure(indent + 1)
+            result.append(f"{prefix}SUBQUERY:")
+            sub_result = clause.query.__str__().split('\n')
+            for line in sub_result[1:]:  # Skip the first line which is 'SPARQLQuery:'
+                result.append(f"{prefix}  {line}")
         
         elif isinstance(clause, list):
             for i, subquery in enumerate(clause):
-                print(f"{prefix}Item {i+1}:")
-                self._print_clause(subquery, indent + 1)
+                result.append(f"{prefix}Item {i+1}:")
+                subq_lines = self._str_clause(subquery, indent + 2)
+                result.extend(subq_lines)
         
         else:
-            print(f"{prefix}Unknown clause type: {type(clause)}")
+            result.append(f"{prefix}Unknown clause type: {type(clause)}")
+            
+        return result
+    
+    # Keep the old method for backward compatibility
+    def print_structure(self, indent=0):
+        """
+        Print the hierarchical structure of the query.
+        
+        Parameters
+        ----------
+        indent : int, optional
+            The initial indentation level (default is 0).
+        """
+        print(self.__str__())
 
 
 def extract_triple_patterns(sparql_query: SPARQLQuery) -> List[TriplePattern]:

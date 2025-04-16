@@ -9,7 +9,7 @@ import logging
 from typing import Dict, List, Union, Any
 from .query import (
     SPARQLQuery, BGP, TriplePattern, UnionOperator, 
-    OptionalOperator, Filter, OrderBy, SubQuery, GroupBy
+    OptionalOperator, Filter, OrderBy, SubQuery, GroupBy, AggregationExpression
 )
 from .errors import OrderByValidationError
 
@@ -164,14 +164,36 @@ class SPARQLParser:
             Suppress(Literal('}'))
         ).setResultsName('where')
         
-        # 15. SELECT clause
+        # Define aggregation functions for SELECT clauses
+        agg_function = oneOf('COUNT SUM MIN MAX AVG')
+        
+        # Define an aggregation expression (e.g., (COUNT(?x) AS ?count))
+        agg_expression = Group(
+            Suppress(Literal('(')) +
+            agg_function.setResultsName('function') +
+            Suppress(Literal('(')) +
+            Optional(Keyword('DISTINCT').setResultsName('distinct')) +
+            (Literal('*').setResultsName('var_star') | variable.setResultsName('variable')) +
+            Suppress(Literal(')')) +
+            Suppress(Keyword('AS')) +
+            variable.setResultsName('alias') +
+            Suppress(Literal(')'))
+        ).setResultsName('aggregation')
+        
+        # 15. SELECT clause - updated to support aggregations
         select_all = Literal('*').setResultsName('select_all')
         select_vars = OneOrMore(variable).setResultsName('select_vars')
+        select_aggs = OneOrMore(agg_expression).setResultsName('select_aggs')
+        
+        # Combined projection options
+        projection = OneOrMore(
+            agg_expression | variable
+        ).setResultsName('projection')
         
         select_clause = (
             Suppress(Literal('SELECT')) + 
             Optional(Literal('DISTINCT')).setResultsName('distinct') +
-            (select_all | select_vars)
+            (select_all | projection)
         ).setResultsName('select')
         
         # Define a variable that could be in parentheses
@@ -225,6 +247,7 @@ class SPARQLParser:
         self.select_clause = select_clause
         self.order_by_clause = order_by_clause
         self.group_by_clause = group_by_clause
+        self.agg_expression = agg_expression
         self.query = query
     
     def parse(self, query_string: str) -> Dict:
@@ -274,19 +297,48 @@ class SPARQLParser:
             patterns = []
             order_by_dict = {}
             group_by_dict = {}
+            aggregations = []
             
             # Handle SELECT clause
             if 'select' in named_keys:
                 # Check if it's SELECT *
                 if 'select_all' in result:
                     select_dict['variables'] = '*'
-                # Otherwise it's a list of variables
-                elif 'select_vars' in result:
-                    select_dict['variables'] = list(result.select_vars)
-                
+                # Otherwise check for projection elements
+                elif 'projection' in result:
+                    # Process each projection element (variable or aggregation)
+                    select_dict['variables'] = []
+                    
+                    for item in result.projection:
+                        if isinstance(item, str) and item.startswith('?'):
+                            # It's a regular variable
+                            select_dict['variables'].append(item)
+                        elif isinstance(item, ParseResults) and 'function' in item:
+                            # It's an aggregation expression
+                            agg_dict = {
+                                'function': item.function,
+                                'alias': item.alias
+                            }
+                            
+                            # Handle variable (can be * for COUNT or a regular variable)
+                            if 'var_star' in item:
+                                agg_dict['variable'] = '*'
+                            else:
+                                agg_dict['variable'] = item.variable
+                                
+                            # Check for DISTINCT keyword
+                            if 'distinct' in item:
+                                agg_dict['distinct'] = True
+                                
+                            aggregations.append(agg_dict)
+                    
                 # Check if DISTINCT was specified
                 if 'distinct' in result and result.distinct:
                     select_dict['distinct'] = True
+                    
+                # Add aggregations to select_dict if found
+                if aggregations:
+                    select_dict['aggregations'] = aggregations
             
             # Handle GROUP BY clause
             if 'group_by' in named_keys:
@@ -567,6 +619,19 @@ class SPARQLParser:
         if 'select' in structured_dict and 'distinct' in structured_dict['select']:
             is_distinct = structured_dict['select']['distinct']
             
+        # Extract aggregations if present
+        aggregations = []
+        if 'select' in structured_dict and 'aggregations' in structured_dict['select']:
+            for agg_dict in structured_dict['select']['aggregations']:
+                aggregations.append(
+                    AggregationExpression(
+                        function=agg_dict['function'],
+                        variable=agg_dict['variable'],
+                        alias=agg_dict['alias'],
+                        distinct=agg_dict.get('distinct', False)
+                    )
+                )
+            
         # For debugging
         logger.debug(f"Converting structured dict: {structured_dict}")
         
@@ -588,10 +653,9 @@ class SPARQLParser:
             variables = structured_dict['group_by']['variables']
             group_by = GroupBy(variables=variables)
             
-            # Validate SELECT variables
-            if projection_variables != ['*']:
+            # Validate SELECT variables - only when no aggregations
+            if projection_variables != ['*'] and not aggregations:
                 # If using GROUP BY, all non-aggregated variables in SELECT must be in GROUP BY
-                # For now, we just assume there are no aggregates
                 for var in projection_variables:
                     if var not in variables:
                         raise OrderByValidationError(f"Non-group key variable in SELECT: {var}")
@@ -622,7 +686,8 @@ class SPARQLParser:
             filters=filters if filters else None,
             group_by=group_by,
             order_by=order_by,
-            is_distinct=is_distinct
+            is_distinct=is_distinct,
+            aggregations=aggregations if aggregations else None
         )
     
     def _build_where_clause(self, structured_dict: Dict) -> Union[BGP, UnionOperator, OptionalOperator, SubQuery, List]:
