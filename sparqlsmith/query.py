@@ -96,6 +96,12 @@ class OrderBy:
     variables: List[str]
     ascending: Union[bool, List[bool]] = True
 
+
+@dataclass
+class GroupBy:
+    variables: List[str]
+
+
 @dataclass
 class SubQuery:
     query: 'SPARQLQuery'
@@ -108,6 +114,7 @@ class SPARQLQuery:
             where_clause: Union[BGP, UnionOperator, OptionalOperator, SubQuery, List[SubQuery]] = None,
             filters: List[Filter] = None,
             order_by: Optional[OrderBy] = None,
+            group_by: Optional[GroupBy] = None,
             limit: Optional[int] = None,
             offset: Optional[int] = None,
             graph: Optional[str] = None,
@@ -119,6 +126,7 @@ class SPARQLQuery:
         self.where_clause = where_clause
         self.filters = filters
         self.order_by = order_by
+        self.group_by = group_by
         self.limit = limit
         self.offset = offset
         self.graph = graph
@@ -270,6 +278,12 @@ class SPARQLQuery:
             for filter in self.filters:
                 query += f"  FILTER({filter.expression})\n"
         query += "}"
+        
+        # Add GROUP BY if present
+        if self.group_by and self.group_by.variables:
+            query += f"\nGROUP BY {' '.join(self.group_by.variables)}"
+        
+        # Add ORDER BY if present
         if self.order_by:
             query += "\nORDER BY "
             terms = []
@@ -573,6 +587,9 @@ class SPARQLQuery:
             print(f"{prefix}  Filters:")
             for filter in self.filters:
                 print(f"{prefix}    {filter.expression}")
+        
+        if self.group_by:
+            print(f"{prefix}  GroupBy: {', '.join(self.group_by.variables)}")
         
         if self.order_by:
             print(f"{prefix}  OrderBy:", end=" ")

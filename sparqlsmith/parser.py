@@ -9,8 +9,9 @@ import logging
 from typing import Dict, List, Union, Any
 from .query import (
     SPARQLQuery, BGP, TriplePattern, UnionOperator, 
-    OptionalOperator, Filter, OrderBy, SubQuery
+    OptionalOperator, Filter, OrderBy, SubQuery, GroupBy
 )
+from .errors import OrderByValidationError
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(levelname)s: %(message)s')
@@ -199,8 +200,15 @@ class SPARQLParser:
             OneOrMore(order_by_term)
         ).setResultsName('order_by')
         
+        # GROUP BY clause (supports only variables for now)
+        group_by_clause = (
+            Suppress(Literal('GROUP')) + 
+            Suppress(Literal('BY')) + 
+            OneOrMore(variable)
+        ).setResultsName('group_by')
+        
         # 16. Complete SPARQL query
-        query = select_clause + where_clause + Optional(order_by_clause)
+        query = select_clause + where_clause + Optional(group_by_clause) + Optional(order_by_clause)
         
         # Save grammar elements as instance variables
         self.variable = variable
@@ -216,6 +224,7 @@ class SPARQLParser:
         self.where_clause = where_clause
         self.select_clause = select_clause
         self.order_by_clause = order_by_clause
+        self.group_by_clause = group_by_clause
         self.query = query
     
     def parse(self, query_string: str) -> Dict:
@@ -264,6 +273,7 @@ class SPARQLParser:
             select_dict = {}
             patterns = []
             order_by_dict = {}
+            group_by_dict = {}
             
             # Handle SELECT clause
             if 'select' in named_keys:
@@ -277,6 +287,10 @@ class SPARQLParser:
                 # Check if DISTINCT was specified
                 if 'distinct' in result and result.distinct:
                     select_dict['distinct'] = True
+            
+            # Handle GROUP BY clause
+            if 'group_by' in named_keys:
+                group_by_dict['variables'] = list(result.group_by)
             
             # Handle ORDER BY clause
             if 'order_by' in named_keys:
@@ -351,8 +365,10 @@ class SPARQLParser:
                             filter_dict['expression'] = self._format_filter_expression(result.filter[0])
                         patterns.append({'filter': filter_dict})
                 
-                # Return the ordered patterns with select and order_by
+                # Return the ordered patterns with select, group_by, and order_by
                 result_dict = {'patterns': patterns, 'select': select_dict}
+                if group_by_dict:
+                    result_dict['group_by'] = group_by_dict
                 if order_by_dict:
                     result_dict['order_by'] = order_by_dict
                 return result_dict
@@ -405,6 +421,10 @@ class SPARQLParser:
             # Add select clause if we have it
             if select_dict:
                 result_dict['select'] = select_dict
+            
+            # Add group_by clause if we have it
+            if group_by_dict:
+                result_dict['group_by'] = group_by_dict
                 
             # Add order_by clause if we have it
             if order_by_dict:
@@ -562,6 +582,20 @@ class SPARQLParser:
                 if 'filter' in pattern:
                     filters.append(Filter(pattern['filter']['expression']))
         
+        # Extract GROUP BY
+        group_by = None
+        if 'group_by' in structured_dict:
+            variables = structured_dict['group_by']['variables']
+            group_by = GroupBy(variables=variables)
+            
+            # Validate SELECT variables
+            if projection_variables != ['*']:
+                # If using GROUP BY, all non-aggregated variables in SELECT must be in GROUP BY
+                # For now, we just assume there are no aggregates
+                for var in projection_variables:
+                    if var not in variables:
+                        raise OrderByValidationError(f"Non-group key variable in SELECT: {var}")
+        
         # Extract ORDER BY
         order_by = None
         if 'order_by' in structured_dict:
@@ -586,6 +620,7 @@ class SPARQLParser:
             projection_variables=projection_variables,
             where_clause=where_clause,
             filters=filters if filters else None,
+            group_by=group_by,
             order_by=order_by,
             is_distinct=is_distinct
         )

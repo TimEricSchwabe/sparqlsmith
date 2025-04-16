@@ -385,5 +385,28 @@ class TestSPARQLParser(unittest.TestCase):
         self.assertIn("DESC(?age)", query_str_result)
         self.assertIn("ASC(?email)", query_str_result)
 
+
+    def test_group_by_parsing(self):
+        """Test parsing of a query with GROUP BY clause"""
+        query_str = """
+            SELECT ?age
+            WHERE { 
+                ?person :name ?name .
+                ?person :age ?age .
+            }
+            GROUP BY ?age
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Verify the group_by attribute exists
+        self.assertIsNotNone(query_obj.group_by)
+        
+        # Check the group by variables
+        self.assertEqual(query_obj.group_by.variables, ['?age'])
+        
+        # Check the serialized query contains the GROUP BY
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("GROUP BY ?age", query_str_result)
+
 if __name__ == '__main__':
     unittest.main() 

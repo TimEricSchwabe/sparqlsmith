@@ -44,13 +44,16 @@ def test_query(query_str):
 
 if __name__ == "__main__":
     test_query("""
-        SELECT * 
-        WHERE { 
-            ?person :name ?name .
-            ?person :age ?age .
-        }
-        ORDER BY ?age
-    """)
+            SELECT ?age
+            WHERE { 
+                ?person :name ?name .
+                ?person :age ?age .
+            }
+            GROUP BY ?age
+        """
+    )
+
+    exit()
 
     test_query("""
         SELECT * 
