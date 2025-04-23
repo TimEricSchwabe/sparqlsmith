@@ -92,6 +92,19 @@ class Filter:
 
 
 @dataclass
+class Having:
+    """
+    A class to represent a HAVING condition in a SPARQL query.
+    
+    Attributes
+    ----------
+    expression : str
+        The expression to filter groups after aggregation.
+    """
+    expression: str
+
+
+@dataclass
 class OrderBy:
     variables: List[str]
     ascending: Union[bool, List[bool]] = True
@@ -135,6 +148,7 @@ class SPARQLQuery:
             projection_variables: List[str] = None,
             where_clause: Union[BGP, UnionOperator, OptionalOperator, SubQuery, List[SubQuery]] = None,
             filters: List[Filter] = None,
+            having: List[Having] = None,
             order_by: Optional[OrderBy] = None,
             group_by: Optional[GroupBy] = None,
             limit: Optional[int] = None,
@@ -147,6 +161,7 @@ class SPARQLQuery:
         self.projection_variables = projection_variables if projection_variables is not None else ['*']
         self.where_clause = where_clause
         self.filters = filters
+        self.having = having
         self.order_by = order_by
         self.group_by = group_by
         self.limit = limit
@@ -323,6 +338,11 @@ class SPARQLQuery:
         # Add GROUP BY if present
         if self.group_by and self.group_by.variables:
             query += f"\nGROUP BY {' '.join(self.group_by.variables)}"
+        
+        # Add HAVING if present
+        if self.having:
+            for having in self.having:
+                query += f"\nHAVING({having.expression})"
         
         # Add ORDER BY if present
         if self.order_by:
@@ -653,6 +673,11 @@ class SPARQLQuery:
         if self.group_by:
             result.append(f"  GroupBy: {', '.join(self.group_by.variables)}")
         
+        if self.having:
+            result.append(f"  Having:")
+            for having in self.having:
+                result.append(f"    {having.expression}")
+        
         if self.order_by:
             result.append(f"  OrderBy:")
             
@@ -681,7 +706,7 @@ class SPARQLQuery:
         
         result.append(f"  Where Clause:")
         
-        # Use the existing _print_clause logic but capture the output
+        # Use the existing _str_clause logic but capture the output
         clause_lines = self._str_clause(self.where_clause)
         for line in clause_lines:
             result.append(f"  {line}")

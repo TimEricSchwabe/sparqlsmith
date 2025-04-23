@@ -51,6 +51,7 @@ if __name__ == "__main__":
                 ?person :salary ?salary .
             }
             GROUP BY ?age
+            HAVING(COUNT(?person) > 10)
         """
     )
 

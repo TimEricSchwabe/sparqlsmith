@@ -9,7 +9,7 @@ import logging
 from typing import Dict, List, Union, Any
 from .query import (
     SPARQLQuery, BGP, TriplePattern, UnionOperator, 
-    OptionalOperator, Filter, OrderBy, SubQuery, GroupBy, AggregationExpression
+    OptionalOperator, Filter, OrderBy, SubQuery, GroupBy, AggregationExpression, Having
 )
 from .errors import OrderByValidationError
 
@@ -229,8 +229,53 @@ class SPARQLParser:
             OneOrMore(variable)
         ).setResultsName('group_by')
         
+        # HAVING clause - similar to filter but allows aggregation functions
+        having_expression = Forward()
+        
+        # Define an aggregation expression in a HAVING clause (e.g., AVG(?size) > 10)
+        having_agg_function = Group(
+            agg_function +
+            Suppress(Literal('(')) +
+            Optional(Keyword('DISTINCT').setResultsName('distinct')) +
+            (Literal('*').setResultsName('var_star') | variable.setResultsName('variable')) +
+            Suppress(Literal(')'))
+        ).setResultsName('having_agg')
+        
+        # Basic term for having expressions (can be an aggregation, variable, literal, or number)
+        having_expr_term = having_agg_function | expr_term
+        
+        # Define a having base expression
+        having_base_expr = having_expr_term
+        
+        # Define an arithmetic expression for HAVING
+        having_arithmetic_expr = (
+            having_base_expr + 
+            ZeroOrMore(Group(
+                arithmetic_op + 
+                having_base_expr
+            ).setResultsName('arithmetic_op'))
+        )
+        
+        # Define a comparison expression for HAVING
+        having_comparison_expr = Group(
+            having_arithmetic_expr + 
+            comparison_op + 
+            having_arithmetic_expr
+        ).setResultsName('comparison')
+        
+        # The full HAVING expression can be comparison or arithmetic
+        having_expression << (having_comparison_expr | having_arithmetic_expr)
+        
+        # HAVING pattern
+        having_pattern = Group(
+            Suppress(Literal('HAVING')) +
+            Suppress(Literal('(')) +
+            having_expression +
+            Suppress(Literal(')'))
+        ).setResultsName('having')
+        
         # 16. Complete SPARQL query
-        query = select_clause + where_clause + Optional(group_by_clause) + Optional(order_by_clause)
+        query = select_clause + where_clause + Optional(group_by_clause) + Optional(having_pattern) + Optional(order_by_clause)
         
         # Save grammar elements as instance variables
         self.variable = variable
@@ -247,6 +292,7 @@ class SPARQLParser:
         self.select_clause = select_clause
         self.order_by_clause = order_by_clause
         self.group_by_clause = group_by_clause
+        self.having_pattern = having_pattern
         self.agg_expression = agg_expression
         self.query = query
     
@@ -297,6 +343,7 @@ class SPARQLParser:
             patterns = []
             order_by_dict = {}
             group_by_dict = {}
+            having_dict = {}
             aggregations = []
             
             # Handle SELECT clause
@@ -343,6 +390,10 @@ class SPARQLParser:
             # Handle GROUP BY clause
             if 'group_by' in named_keys:
                 group_by_dict['variables'] = list(result.group_by)
+            
+            # Handle HAVING clause
+            if 'having' in named_keys:
+                having_dict['expression'] = self._direct_having_formatter(result.having[0])
             
             # Handle ORDER BY clause
             if 'order_by' in named_keys:
@@ -417,10 +468,12 @@ class SPARQLParser:
                             filter_dict['expression'] = self._format_filter_expression(result.filter[0])
                         patterns.append({'filter': filter_dict})
                 
-                # Return the ordered patterns with select, group_by, and order_by
+                # Return the ordered patterns with select, group_by, having, and order_by
                 result_dict = {'patterns': patterns, 'select': select_dict}
                 if group_by_dict:
                     result_dict['group_by'] = group_by_dict
+                if having_dict:
+                    result_dict['having'] = having_dict
                 if order_by_dict:
                     result_dict['order_by'] = order_by_dict
                 return result_dict
@@ -458,6 +511,13 @@ class SPARQLParser:
                     filter_dict['expression'] = self._format_filter_expression(result.filter[0])
                 result_dict['filter'] = filter_dict
             
+            if 'having' in result:
+                having_dict = {}
+                if result.having:
+                    # Get the raw parsed result and format directly
+                    having_dict['expression'] = self._direct_having_formatter(result.having[0])
+                result_dict['having'] = having_dict
+            
             if 'braced' in result:
                 # Process the braced pattern
                 braced_result = self.convert_to_structured_dict(result.braced)
@@ -477,6 +537,10 @@ class SPARQLParser:
             # Add group_by clause if we have it
             if group_by_dict:
                 result_dict['group_by'] = group_by_dict
+                
+            # Add having clause if we have it
+            if having_dict:
+                result_dict['having'] = having_dict
                 
             # Add order_by clause if we have it
             if order_by_dict:
@@ -551,6 +615,54 @@ class SPARQLParser:
         
         # Default case: return as string
         return str(expr)
+    
+    def _direct_having_formatter(self, having_expr) -> str:
+        """
+        Format a HAVING expression by directly converting the parsed result structure.
+        
+        This handles the specific structure of HAVING expressions like:
+        [[['COUNT', '?person'], '>', 10]]
+        
+        Parameters
+        ----------
+        having_expr : ParseResults or list
+            The parsed HAVING expression with nested structure.
+            
+        Returns
+        -------
+        str
+            A properly formatted HAVING expression string.
+        """
+        # Convert to list if it's ParseResults
+        if isinstance(having_expr, ParseResults):
+            having_expr = list(having_expr)
+        
+        # Handle additional nested list level if present
+        if len(having_expr) == 1 and isinstance(having_expr[0], (list, ParseResults)):
+            having_expr = having_expr[0]
+        
+        # Check if we have a comparison structure [left, op, right]
+        if isinstance(having_expr, (list, ParseResults)) and len(having_expr) == 3:
+            left = having_expr[0]
+            op = having_expr[1]
+            right = having_expr[2]
+            
+            # Process the left side (usually an aggregation function)
+            if isinstance(left, (list, ParseResults)) and len(left) >= 2:
+                func = left[0]  # e.g., 'COUNT'
+                var = left[1]   # e.g., '?person'
+                left_str = f"{func}({var})"
+            else:
+                left_str = str(left)
+                
+            # Right side could be a number or another expression
+            right_str = str(right)
+            
+            return f"{left_str} {op} {right_str}"
+        
+        # Fallback for unrecognized structures
+        logger.warning(f"Unrecognized HAVING expression structure: {having_expr}")
+        return str(having_expr)
     
     def flatten_nested_structures(self, result_dict: Dict) -> Dict:
         """
@@ -647,6 +759,13 @@ class SPARQLParser:
                 if 'filter' in pattern:
                     filters.append(Filter(pattern['filter']['expression']))
         
+        # Extract HAVING conditions
+        having = []
+        # Only check if there's a having condition at top level
+        # and ignore any having conditions in patterns
+        if 'having' in structured_dict:
+            having.append(Having(structured_dict['having']['expression']))
+        
         # Extract GROUP BY
         group_by = None
         if 'group_by' in structured_dict:
@@ -684,6 +803,7 @@ class SPARQLParser:
             projection_variables=projection_variables,
             where_clause=where_clause,
             filters=filters if filters else None,
+            having=having if having else None,
             group_by=group_by,
             order_by=order_by,
             is_distinct=is_distinct,

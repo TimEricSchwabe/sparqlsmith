@@ -492,5 +492,39 @@ class TestSPARQLParser(unittest.TestCase):
         query_str_result = query_obj.to_query_string()
         self.assertIn("(COUNT(*) AS ?total)", query_str_result)
 
+    def test_having_clause(self):
+        """Test parsing of a query with HAVING clause"""
+        query_str = """
+            SELECT DISTINCT ?age (COUNT(?person) AS ?count)
+            WHERE { 
+                ?person :name ?name .
+                ?person :age ?age .
+                ?person :salary ?salary .
+            }
+            GROUP BY ?age
+            HAVING(COUNT(?person) > 10)
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Verify the having attribute exists
+        self.assertIsNotNone(query_obj.having)
+        self.assertEqual(len(query_obj.having), 1)
+        
+        # Check the having expression is correctly parsed
+        self.assertEqual(query_obj.having[0].expression, "COUNT(?person) > 10")
+        
+        # Check the serialized query contains the HAVING clause
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("HAVING(COUNT(?person) > 10)", query_str_result)
+        
+        # Also verify that the other parts of the query are correct
+        self.assertTrue(query_obj.is_distinct)
+        self.assertIsNotNone(query_obj.group_by)
+        self.assertEqual(query_obj.group_by.variables, ['?age'])
+        self.assertEqual(len(query_obj.aggregations), 1)
+        self.assertEqual(query_obj.aggregations[0].function, "COUNT")
+        self.assertEqual(query_obj.aggregations[0].variable, "?person")
+        self.assertEqual(query_obj.aggregations[0].alias, "?count")
+
 if __name__ == '__main__':
     unittest.main() 
