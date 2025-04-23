@@ -9,7 +9,7 @@ import logging
 from typing import Dict, List, Union, Any
 from .query import (
     SPARQLQuery, BGP, TriplePattern, UnionOperator, 
-    OptionalOperator, Filter, OrderBy, SubQuery, GroupBy, AggregationExpression, Having
+    OptionalOperator, Filter, OrderBy, SubQuery, GroupBy, AggregationExpression, Having, GroupGraphPattern
 )
 from .errors import OrderByValidationError
 
@@ -26,10 +26,20 @@ class SPARQLParser:
     and then into SPARQLQuery objects.
     """
     
-    def __init__(self):
-        """Initialize the SPARQL parser grammar."""
+    def __init__(self, preserve_nesting=True):
+        """
+        Initialize the SPARQL parser grammar.
+        
+        Parameters
+        ----------
+        preserve_nesting : bool, optional
+            Whether to preserve nested GroupGraphPatterns in the query (default is True).
+        """
         # Enable packrat parsing for better performance
         ParserElement.enablePackrat()
+        
+        # Store whether to preserve nesting
+        self.preserve_nesting = preserve_nesting
         
         # Define the grammar
         self._define_grammar()
@@ -571,7 +581,8 @@ class SPARQLParser:
             
             # Return the result dict if we found any named components
             if result_dict:
-                return self.flatten_nested_structures(result_dict)
+                return result_dict
+                return self.flatten_nested_structures(result_dict) #todo
                 
             # If we didn't find any named components but there are list items,
             # check if it looks like a triple pattern
@@ -847,6 +858,10 @@ class SPARQLParser:
         SPARQLQuery
             A SPARQLQuery object representing the query.
         """
+        # Apply structure flattening if not preserving nesting
+        if not self.preserve_nesting:
+            structured_dict = self.flatten_nested_structures(structured_dict)
+            
         # Extract SELECT variables
         projection_variables = ['*']  # Default
         if 'select' in structured_dict and 'variables' in structured_dict['select']:
@@ -939,7 +954,7 @@ class SPARQLParser:
             aggregations=aggregations if aggregations else None
         )
     
-    def _build_where_clause(self, structured_dict: Dict) -> Union[BGP, UnionOperator, OptionalOperator, SubQuery, List]:
+    def _build_where_clause(self, structured_dict: Dict) -> Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, List]:
         """
         Build the WHERE clause from a structured dictionary.
         
@@ -950,7 +965,7 @@ class SPARQLParser:
             
         Returns
         -------
-        Union[BGP, UnionOperator, OptionalOperator, SubQuery, List]
+        Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, List]
             The corresponding WHERE clause object.
         """
         logger.debug(f"Building where clause from: {structured_dict}")
@@ -991,7 +1006,11 @@ class SPARQLParser:
                                 bgp=self._build_where_clause(pattern_content['pattern'])
                             ))
                         elif pattern_type == 'group':
-                            result_parts.append(self._build_where_clause(pattern_content))
+                            group_content = self._build_where_clause(pattern_content)
+                            if self.preserve_nesting:
+                                result_parts.append(GroupGraphPattern(pattern=group_content))
+                            else:
+                                result_parts.append(group_content)
                 
                 # If we have only one part, return it directly
                 if len(result_parts) == 1:
@@ -1014,7 +1033,11 @@ class SPARQLParser:
                                 bgp=self._build_where_clause(pattern_content['pattern'])
                             )
                         elif pattern_type == 'group':
-                            return self._build_where_clause(pattern_content)
+                            group_content = self._build_where_clause(pattern_content)
+                            if self.preserve_nesting:
+                                return GroupGraphPattern(pattern=group_content)
+                            else:
+                                return group_content
                 
                 # Multiple patterns, build them in order
                 result_parts = []
@@ -1030,7 +1053,11 @@ class SPARQLParser:
                                 bgp=self._build_where_clause(pattern_content['pattern'])
                             ))
                         elif pattern_type == 'group':
-                            result_parts.append(self._build_where_clause(pattern_content))
+                            group_content = self._build_where_clause(pattern_content)
+                            if self.preserve_nesting:
+                                result_parts.append(GroupGraphPattern(pattern=group_content))
+                            else:
+                                result_parts.append(group_content)
                 
                 # Return as list
                 return result_parts
@@ -1061,7 +1088,11 @@ class SPARQLParser:
         
         # Handle Group
         elif 'group' in structured_dict:
-            return self._build_where_clause(structured_dict['group'])
+            group_content = self._build_where_clause(structured_dict['group'])
+            if self.preserve_nesting:
+                return GroupGraphPattern(pattern=group_content)
+            else:
+                return group_content
         
         # Default empty BGP
         return BGP()

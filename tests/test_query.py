@@ -10,7 +10,7 @@ from sparqlsmith import (
 from sparqlsmith.parser import SPARQLParser
 from sparqlsmith.errors import OrderByValidationError
 from sparqlsmith.query import AggregationExpression
-
+from sparqlsmith.query import GroupGraphPattern
 class TestSPARQLQuery(unittest.TestCase):
     def test_query_isomorphism_simple_bgp(self):
         # Test for simple BGP - positive case
@@ -164,16 +164,16 @@ class TestSPARQLParser(unittest.TestCase):
     def setUp(self):
         self.parser = SPARQLParser()
         
-    def _parse_and_verify(self, query_str):
+    def _parse_and_verify(self, query_str, preserve_nesting=False):
         """Helper method to parse a query and do basic verification"""
-        result = self.parser.parse(query_str)
-        query_obj = self.parser.structured_dict_to_query(result)
+        parser = SPARQLParser(preserve_nesting=preserve_nesting)
+        result = parser.parse(query_str)
+        query_obj = parser.structured_dict_to_query(result)
         
         # Verify that the query can be converted back to a string
         query_str_result = query_obj.to_query_string()
         self.assertIsInstance(query_str_result, str)
         
-            
         return query_obj
         
     def test_simple_select_query(self):
@@ -234,15 +234,53 @@ class TestSPARQLParser(unittest.TestCase):
         self.assertEqual(len(query_obj.filters), 1)
         self.assertEqual(query_obj.filters[0].expression, "?o > 5")
         
-    def test_nested_query(self):
-        """Test parsing of a nested query with braces"""
+    def test_nested_query_flattened(self):
+        """Test that nested braces are flattened when preserve_nesting=False"""
         query_str = "SELECT ?s ?p ?o WHERE { { { ?s ?p ?o . } } }"
-        query_obj = self._parse_and_verify(query_str)
+        query_obj = self._parse_and_verify(query_str, preserve_nesting=False)
         
         # The nested structure should be flattened to a simple BGP
         self.assertIsInstance(query_obj.where_clause, BGP)
         self.assertEqual(len(query_obj.where_clause.triples), 1)
         
+        # Verify triple content
+        triple = query_obj.where_clause.triples[0]
+        self.assertEqual(triple.subject, "?s")
+        self.assertEqual(triple.predicate, "?p")
+        self.assertEqual(triple.object, "?o")
+        
+        # Verify serialized query doesn't have nested braces
+        query_str_result = query_obj.to_query_string()
+        self.assertNotIn("{  {", query_str_result)
+        
+    def test_nested_query_preserved(self):
+        """Test that nested braces are preserved when preserve_nesting=True"""
+        query_str = "SELECT ?s ?p ?o WHERE { { { ?s ?p ?o . } } }"
+        query_obj = self._parse_and_verify(query_str, preserve_nesting=True)
+        
+        # The where clause should be a GroupGraphPattern
+        self.assertIsInstance(query_obj.where_clause, GroupGraphPattern)
+        
+        # First level of nesting
+        inner_pattern1 = query_obj.where_clause.pattern
+        self.assertIsInstance(inner_pattern1, GroupGraphPattern)
+        
+        # Second level of nesting
+        inner_pattern2 = inner_pattern1.pattern 
+        self.assertIsInstance(inner_pattern2, BGP)
+        self.assertEqual(len(inner_pattern2.triples), 1)
+        
+        # Verify triple content
+        triple = inner_pattern2.triples[0]
+        self.assertEqual(triple.subject, "?s")
+        self.assertEqual(triple.predicate, "?p")
+        self.assertEqual(triple.object, "?o")
+        
+        # Verify serialized query has nested braces
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("{\n    {\n      ?s ?p ?o", query_str_result)
+        
+
     def test_complex_query(self):
         """Test parsing of a complex query with DISTINCT, FILTER, OPTIONAL, and UNION"""
         query_str = """
@@ -556,6 +594,23 @@ class TestSPARQLParser(unittest.TestCase):
         self.assertIn("COUNT(?person) > 10", query_str_result)
         self.assertIn("AND", query_str_result)
         self.assertIn("AVG(?salary) > 10000", query_str_result)
+
+    def test_nested_query_default_behavior(self):
+        """Test that the default behavior is to flatten nested braces"""
+        query_str = "SELECT ?s ?p ?o WHERE { { { ?s ?p ?o . } } }"
+        
+        # Create a parser without explicitly setting preserve_nesting
+        default_parser = SPARQLParser()
+        result = default_parser.parse(query_str)
+        query_obj = default_parser.structured_dict_to_query(result)
+        
+        # The nested structure should be flattened to a simple BGP
+        self.assertIsInstance(query_obj.where_clause, BGP)
+        self.assertEqual(len(query_obj.where_clause.triples), 1)
+        
+        # Verify serialized query doesn't have nested braces
+        query_str_result = query_obj.to_query_string()
+        self.assertNotIn("{  {", query_str_result)
 
 if __name__ == '__main__':
     unittest.main() 

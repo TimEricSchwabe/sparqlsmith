@@ -11,18 +11,19 @@ logger = logging.getLogger(__name__)
 # Enable debug
 pyparsing.enable_all_warnings()
 
-def test_query(query_str):
+def test_query(query_str, preserve_nesting=False):
 
     print("--------------------------------")
     print("--------------------------------")
 
     print(f"Testing Query: {query_str}")
+    print(f"Preserve Nesting: {preserve_nesting}")
 
     print("--------------------------------")
 
 
     """Test parsing of a basic SPARQL query."""
-    parser = SPARQLParser()
+    parser = SPARQLParser(preserve_nesting=preserve_nesting)
     
     # Parse to structured dict
     result = parser.parse(query_str)
@@ -43,6 +44,34 @@ def test_query(query_str):
 
 
 if __name__ == "__main__":
+
+    # Test with nested braces - comparing flattened vs preserved nesting
+    print("\n===== Testing with flattened nesting (default) =====")
+    test_query("SELECT ?s ?p ?o WHERE { { { ?s ?p ?o . } } }", preserve_nesting=False)
+    
+    print("\n===== Testing with preserved nesting =====")
+    test_query("SELECT ?s ?p ?o WHERE { { { ?s ?p ?o . } } }", preserve_nesting=True)
+    
+    # Complex query with nesting and other SPARQL features
+    print("\n===== Complex nested query with preserved nesting =====")
+    test_query("""
+        SELECT ?s ?p ?o
+        WHERE { 
+            { 
+                ?s ?p ?o . 
+                OPTIONAL { ?o ?p2 ?x . } 
+            }
+            UNION
+            { 
+                { ?o ?p ?s . } 
+                FILTER(?s != ?o)
+            }
+        }
+    """, preserve_nesting=True)
+
+    exit()
+
+
     test_query("""
             SELECT DISTINCT ?age (COUNT(?person) AS ?count)
             WHERE { 

@@ -121,6 +121,19 @@ class SubQuery:
 
 
 @dataclass
+class GroupGraphPattern:
+    """
+    A class to represent a nested group graph pattern in a SPARQL query.
+
+    Attributes
+    ----------
+    pattern : Union[BGP, UnionOperator, OptionalOperator, SubQuery, 'GroupGraphPattern']
+        The contained pattern inside the group.
+    """
+    pattern: Union['BGP', 'UnionOperator', 'OptionalOperator', 'SubQuery', 'GroupGraphPattern']
+
+
+@dataclass
 class AggregationExpression:
     """
     A class to represent an aggregation expression in a SPARQL query.
@@ -374,8 +387,8 @@ class SPARQLQuery:
 
     def _serialize_where_clause(
             self,
-            clause: Union[BGP, UnionOperator, OptionalOperator, SubQuery, List[
-                Union['BGP', 'UnionOperator', 'OptionalOperator', 'SubQuery']]],
+            clause: Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, List[
+                Union['BGP', 'UnionOperator', 'OptionalOperator', 'SubQuery', 'GroupGraphPattern']]],
             indent: int
     ) -> str:
         if isinstance(clause, BGP):
@@ -386,6 +399,8 @@ class SPARQLQuery:
             return self._serialize_optional(clause, indent)
         elif isinstance(clause, SubQuery):
             return self._serialize_subquery(clause, indent)
+        elif isinstance(clause, GroupGraphPattern):
+            return self._serialize_group(clause, indent)
         elif isinstance(clause, list):
             return ''.join(self._serialize_where_clause(sq, indent) for sq in clause)
         else:
@@ -418,6 +433,13 @@ class SPARQLQuery:
         indented_subquery = '\n'.join("  " * indent + line for line in subquery_str.split('\n'))
         return f"{'  ' * indent}{{\n{indented_subquery}\n{'  ' * indent}}}\n"
 
+    def _serialize_group(self, group: GroupGraphPattern, indent: int) -> str:
+        return (
+                "  " * indent + "{\n" +
+                self._serialize_where_clause(group.pattern, indent + 1) +
+                "  " * indent + "}\n"
+        )
+
     def replace_triple_patterns_with_subqueries(self, limit: int = 300) -> 'SPARQLQuery':
         new_query = copy.deepcopy(self)
         new_query.where_clause = self._replace_clause(new_query.where_clause, limit)
@@ -425,9 +447,9 @@ class SPARQLQuery:
 
     def _replace_clause(
             self,
-            clause: Union[BGP, UnionOperator, OptionalOperator, SubQuery, List[SubQuery]],
+            clause: Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, List[SubQuery]],
             limit: int
-    ) -> Union[BGP, UnionOperator, OptionalOperator, SubQuery, List[SubQuery]]:
+    ) -> Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, List[SubQuery]]:
         if isinstance(clause, BGP):
             return self._replace_bgp(clause, limit)
         elif isinstance(clause, UnionOperator):
@@ -439,6 +461,9 @@ class SPARQLQuery:
             return clause
         elif isinstance(clause, SubQuery):
             clause.query = clause.query.replace_triple_patterns_with_subqueries(limit)
+            return clause
+        elif isinstance(clause, GroupGraphPattern):
+            clause.pattern = self._replace_clause(clause.pattern, limit)
             return clause
         elif isinstance(clause, list):
             return [self._replace_clause(sq, limit) for sq in clause]
@@ -462,7 +487,7 @@ class SPARQLQuery:
 
     def _count_triple_patterns(
             self,
-            clause: Union[BGP, UnionOperator, OptionalOperator, SubQuery, List[SubQuery]]
+            clause: Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, List[SubQuery]]
     ) -> int:
         if isinstance(clause, BGP):
             return len(clause.triples)
@@ -472,6 +497,8 @@ class SPARQLQuery:
             return self._count_triple_patterns(clause.bgp)
         elif isinstance(clause, SubQuery):
             return clause.query.n_triple_patterns
+        elif isinstance(clause, GroupGraphPattern):
+            return self._count_triple_patterns(clause.pattern)
         elif isinstance(clause, list):
             return sum(self._count_triple_patterns(sq) for sq in clause)
         else:
@@ -490,7 +517,7 @@ class SPARQLQuery:
 
     def _count_bgps_recursive(
             self,
-            clause: Union[BGP, UnionOperator, OptionalOperator, SubQuery, List[SubQuery]]
+            clause: Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, List[SubQuery]]
     ) -> int:
         if isinstance(clause, BGP):
             return 1
@@ -500,6 +527,8 @@ class SPARQLQuery:
             return self._count_bgps_recursive(clause.bgp)
         elif isinstance(clause, SubQuery):
             return clause.query.count_bgps()
+        elif isinstance(clause, GroupGraphPattern):
+            return self._count_bgps_recursive(clause.pattern)
         elif isinstance(clause, list):
             return sum(self._count_bgps_recursive(subquery) for subquery in clause)
         else:
@@ -538,6 +567,9 @@ class SPARQLQuery:
 
         elif isinstance(clause1, SubQuery):
             return clause1.query.is_isomorphic(clause2.query)
+            
+        elif isinstance(clause1, GroupGraphPattern):
+            return self._compare_clauses(clause1.pattern, clause2.pattern, variable_mapping)
 
         elif isinstance(clause1, list):
             if len(clause1) != len(clause2):
@@ -719,7 +751,7 @@ class SPARQLQuery:
         
         Parameters
         ----------
-        clause : Union[BGP, UnionOperator, OptionalOperator, SubQuery, List]
+        clause : Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, List]
             The clause to stringify.
         indent : int, optional
             The indentation level (default is 2).
@@ -756,6 +788,11 @@ class SPARQLQuery:
             sub_result = clause.query.__str__().split('\n')
             for line in sub_result[1:]:  # Skip the first line which is 'SPARQLQuery:'
                 result.append(f"{prefix}  {line}")
+        
+        elif isinstance(clause, GroupGraphPattern):
+            result.append(f"{prefix}GroupGraphPattern:")
+            group_lines = self._str_clause(clause.pattern, indent + 2)
+            result.extend(group_lines)
         
         elif isinstance(clause, list):
             for i, subquery in enumerate(clause):
