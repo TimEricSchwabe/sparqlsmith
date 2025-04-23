@@ -51,7 +51,7 @@ if __name__ == "__main__":
                 ?person :salary ?salary .
             }
             GROUP BY ?age
-            HAVING(COUNT(?person) > 10)
+            HAVING((COUNT(?person) > 10) &&  (AVG(?salary) > 10000))
         """
     )
 

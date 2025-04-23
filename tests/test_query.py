@@ -526,5 +526,36 @@ class TestSPARQLParser(unittest.TestCase):
         self.assertEqual(query_obj.aggregations[0].variable, "?person")
         self.assertEqual(query_obj.aggregations[0].alias, "?count")
 
+    def test_complex_having_clause(self):
+        """Test parsing of a query with complex HAVING clause using logical operators"""
+        query_str = """
+            SELECT DISTINCT ?age (COUNT(?person) AS ?count)
+            WHERE { 
+                ?person :name ?name .
+                ?person :age ?age .
+                ?person :salary ?salary .
+            }
+            GROUP BY ?age
+            HAVING((COUNT(?person) > 10) AND (AVG(?salary) > 10000))
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Verify the having attribute exists
+        self.assertIsNotNone(query_obj.having)
+        self.assertEqual(len(query_obj.having), 1)
+        
+        # Check the having expression is correctly parsed and includes the AND operator
+        having_expr = query_obj.having[0].expression
+        self.assertIn("COUNT(?person) > 10", having_expr)
+        self.assertIn("AND", having_expr)
+        self.assertIn("AVG(?salary) > 10000", having_expr)
+        
+        # Check the serialized query contains the complete HAVING clause
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("HAVING", query_str_result)
+        self.assertIn("COUNT(?person) > 10", query_str_result)
+        self.assertIn("AND", query_str_result)
+        self.assertIn("AVG(?salary) > 10000", query_str_result)
+
 if __name__ == '__main__':
     unittest.main() 

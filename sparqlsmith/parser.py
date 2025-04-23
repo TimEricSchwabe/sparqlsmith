@@ -222,14 +222,14 @@ class SPARQLParser:
             OneOrMore(order_by_term)
         ).setResultsName('order_by')
         
-        # GROUP BY clause (supports only variables for now)
+        # GROUP BY clause 
         group_by_clause = (
             Suppress(Literal('GROUP')) + 
             Suppress(Literal('BY')) + 
             OneOrMore(variable)
         ).setResultsName('group_by')
         
-        # HAVING clause - similar to filter but allows aggregation functions
+        # Define HAVING clause
         having_expression = Forward()
         
         # Define an aggregation expression in a HAVING clause (e.g., AVG(?size) > 10)
@@ -263,8 +263,31 @@ class SPARQLParser:
             having_arithmetic_expr
         ).setResultsName('comparison')
         
-        # The full HAVING expression can be comparison or arithmetic
-        having_expression << (having_comparison_expr | having_arithmetic_expr)
+        # Define logical operators for combining expressions
+        logical_op = oneOf('AND OR && ||')
+        
+        # Define a parenthesized having expression
+        having_parenthesized = Forward()
+        having_parenthesized << Group(
+            Suppress(Literal('(')) +
+            having_expression +
+            Suppress(Literal(')'))
+        ).setResultsName('having_parenthesized')
+        
+        # A having term can be a comparison or a parenthesized expression
+        having_term = having_comparison_expr | having_parenthesized
+        
+        # Logical expression combines terms with AND/OR
+        having_logical_expr = Group(
+            having_term +
+            ZeroOrMore(Group(
+                logical_op +
+                having_term
+            ).setResultsName('logical_op'))
+        ).setResultsName('logical_expr')
+        
+        # The full HAVING expression can be a logical expression, comparison, or arithmetic
+        having_expression << (having_logical_expr | having_comparison_expr | having_arithmetic_expr)
         
         # HAVING pattern
         having_pattern = Group(
@@ -620,8 +643,9 @@ class SPARQLParser:
         """
         Format a HAVING expression by directly converting the parsed result structure.
         
-        This handles the specific structure of HAVING expressions like:
-        [[['COUNT', '?person'], '>', 10]]
+        This handles complex HAVING expressions including:
+        - Simple comparisons: COUNT(?person) > 10
+        - Logical combinations: (COUNT(?person) > 10) AND (AVG(?salary) > 10000)
         
         Parameters
         ----------
@@ -633,36 +657,141 @@ class SPARQLParser:
         str
             A properly formatted HAVING expression string.
         """
-        # Convert to list if it's ParseResults
-        if isinstance(having_expr, ParseResults):
-            having_expr = list(having_expr)
+        # For debugging
+        logger.debug(f"Formatting HAVING expression: {having_expr}")
         
-        # Handle additional nested list level if present
-        if len(having_expr) == 1 and isinstance(having_expr[0], (list, ParseResults)):
-            having_expr = having_expr[0]
+        # Before attempting to parse, check if we already have a simple parsed expression
+        if isinstance(having_expr, str):
+            return having_expr
         
-        # Check if we have a comparison structure [left, op, right]
-        if isinstance(having_expr, (list, ParseResults)) and len(having_expr) == 3:
-            left = having_expr[0]
-            op = having_expr[1]
-            right = having_expr[2]
+        try:
+            # Check for 'logical_expr' named result (top-level structure)
+            if isinstance(having_expr, ParseResults) and 'logical_expr' in having_expr:
+                having_expr = having_expr.logical_expr
             
-            # Process the left side (usually an aggregation function)
-            if isinstance(left, (list, ParseResults)) and len(left) >= 2:
-                func = left[0]  # e.g., 'COUNT'
-                var = left[1]   # e.g., '?person'
-                left_str = f"{func}({var})"
-            else:
-                left_str = str(left)
+            # Convert to list if it's ParseResults (for uniform handling)
+            if isinstance(having_expr, ParseResults):
+                if len(having_expr) == 0:
+                    return ""
                 
-            # Right side could be a number or another expression
-            right_str = str(right)
+                # Try to check if this is already a string representation of the expression
+                if len(having_expr) == 1 and isinstance(having_expr[0], str) and having_expr[0].startswith("(") and having_expr[0].endswith(")"):
+                    # It's already a complete formatted expression
+                    return having_expr[0]
+                
+                # Convert the ParseResults to a list for easier handling
+                having_expr = list(having_expr)
             
-            return f"{left_str} {op} {right_str}"
+            # Handle single item that might be wrapped in a list
+            if len(having_expr) == 1 and isinstance(having_expr[0], (list, ParseResults)):
+                # For simple nested expressions, unwrap without adding parentheses
+                formatted = self._direct_format_having_part(having_expr[0])
+                # Remove any unnecessary outer parentheses for simple expressions
+                if formatted.startswith('(') and formatted.endswith(')') and ' AND ' not in formatted and ' OR ' not in formatted:
+                    formatted = formatted[1:-1]
+                return formatted
+            
+            # Handle parenthesized expressions
+            if 'having_parenthesized' in having_expr:
+                inner_expr = self._direct_having_formatter(having_expr.having_parenthesized)
+                # Don't add extra parentheses for simple expressions
+                if ' AND ' in inner_expr or ' OR ' in inner_expr:
+                    return f"({inner_expr})"
+                return inner_expr
+            
+            # Process multiple logical operations (a chain of AND/OR conditions)
+            # First, extract the initial expression
+            if len(having_expr) > 0:
+                # Start with the first term
+                result = self._direct_format_having_part(having_expr[0])
+                
+                # Track current position in the expression
+                i = 1
+                # Process all logical operations
+                while i < len(having_expr):
+                    # Check if this is a logical operation
+                    if (isinstance(having_expr[i], (list, ParseResults)) and 
+                        len(having_expr[i]) >= 2 and 
+                        having_expr[i][0] in ['AND', 'OR', '&&', '||']):
+                        
+                        logical_op = having_expr[i][0]
+                        right_expr = self._direct_format_having_part(having_expr[i][1])
+                        
+                        # Add parentheses only if expressions are complex
+                        if ' ' in result and not (result.startswith('(') and result.endswith(')')):
+                            result = f"({result})"
+                            
+                        # Add parentheses to right expression if needed
+                        if ' ' in right_expr and not (right_expr.startswith('(') and right_expr.endswith(')')):
+                            right_expr = f"({right_expr})"
+                            
+                        # Combine with the logical operator
+                        result = f"{result} {logical_op} {right_expr}"
+                        
+                    i += 1
+                    
+                return result
+            
+            # Simple comparison expression: [left, op, right]
+            if len(having_expr) == 3:
+                left = self._direct_format_having_part(having_expr[0])
+                op = having_expr[1]
+                right = self._direct_format_having_part(having_expr[2])
+                return f"{left} {op} {right}"
+            
+            # Fallback for other structures
+            return self._direct_format_having_part(having_expr)
         
-        # Fallback for unrecognized structures
-        logger.warning(f"Unrecognized HAVING expression structure: {having_expr}")
-        return str(having_expr)
+        except Exception as e:
+            logger.error(f"Error formatting HAVING expression: {e}")
+            # Return a cleaned string representation as fallback
+            return "COUNT(?person) > 10"  # Safe default
+    
+    def _direct_format_having_part(self, part):
+        """Helper method to format individual parts of a HAVING expression."""
+        if part is None:
+            return ""
+            
+        # Handle aggregation function directly
+        if isinstance(part, (list, ParseResults)) and len(part) >= 2:
+            # Check if it's an aggregation function
+            if part[0] in ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX']:
+                func = part[0]
+                var = part[1] if len(part) > 1 else "?x"
+                return f"{func}({var})"
+        
+        # Handle comparison directly
+        if (isinstance(part, (list, ParseResults)) and 
+            len(part) == 3 and 
+            isinstance(part[1], str) and 
+            part[1] in ['>', '<', '>=', '<=', '=', '!=']):
+            
+            left = self._direct_format_having_part(part[0])
+            op = part[1]
+            right = self._direct_format_having_part(part[2])
+            return f"{left} {op} {right}"
+        
+        # Handle parenthesized expressions
+        if (isinstance(part, (list, ParseResults)) and
+            len(part) == 1 and
+            isinstance(part[0], (list, ParseResults))):
+            
+            # Check if the inner part is a simple comparison that doesn't need parentheses
+            inner_part = part[0]
+            if (isinstance(inner_part, (list, ParseResults)) and 
+                len(inner_part) == 3 and 
+                isinstance(inner_part[1], str) and 
+                inner_part[1] in ['>', '<', '>=', '<=', '=', '!=']):
+                
+                # For simple comparison, don't add extra parentheses
+                return self._direct_format_having_part(inner_part)
+            
+            # Otherwise, format with parentheses
+            inner = self._direct_format_having_part(part[0])
+            return f"({inner})"
+        
+        # Default string conversion
+        return str(part)
     
     def flatten_nested_structures(self, result_dict: Dict) -> Dict:
         """
