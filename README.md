@@ -76,6 +76,41 @@ sparql_query = query.to_query_string()
 print(sparql_query)
 ```
 
+**Output:**
+```bash
+SPARQLQuery:
+  Projection: ?person, ?name
+  Filters:
+    REGEX(STR(?name), '^A', 'i')
+  Where Clause:
+    GroupGraphPattern:
+      BGP:
+        Triple: ?person <http://example.org/name> ?name
+    GroupGraphPattern:
+      UNION:
+        Left:
+          BGP:
+            Triple: ?person <http://example.org/isAuthorOf> ?book
+            Triple: ?book <http://example.org/type> <http://example.org/Book>
+        Right:
+          BGP:
+            Triple: ?person <http://example.org/isEditorOf> ?journal
+            Triple: ?journal <http://example.org/type> <http://example.org/Journal>
+----------------------------------------------------------------------------------------------------
+SELECT ?person ?name
+WHERE {
+  ?person <http://example.org/name> ?name .
+  {
+    ?person <http://example.org/isAuthorOf> ?book .
+    ?book <http://example.org/type> <http://example.org/Book> .
+  } UNION {
+    ?person <http://example.org/isEditorOf> ?journal .
+    ?journal <http://example.org/type> <http://example.org/Journal> .
+  }
+  FILTER(REGEX(STR(?name), '^A', 'i'))
+}
+```
+
 Checking if queries are isomorphic
 ```python
 query1 = SPARQLQuery(
@@ -94,7 +129,12 @@ query2 = SPARQLQuery(
     )
 )
 
-print(query1.is_isomorphic(query2)) # True
+print(query1.is_isomorphic(query2)) 
+```
+
+**Output:**
+```
+True
 ```
 
 Instantiating variables in a query
@@ -109,19 +149,32 @@ query = SPARQLQuery(
     projection_variables=['?s', '?o1', '?o3'],
     where_clause=bgp
 )
-    mapping = {
+mapping = {
     'p1': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
     'p2': 'http://example.org/predicate2',
     'o2': 'http://example.org/object2',
 }
 
 # Create a copy of the query and instantiate it
-query.instantiate(mapping)
+instantiated_query = query.instantiate(mapping)
+print(instantiated_query.to_query_string())
+```
+
+**Output:**
+```
+SELECT ?s ?o1 ?o3
+WHERE {
+  ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?o1 .
+  ?s <http://example.org/predicate2> <http://example.org/object2> .
+  ?o1 ?p3 ?o3 .
+}
 ```
 
 Analyzing Query Features
 
 ```python
+from sparqlsmith import SPARQLQuery, BGP, TriplePattern, UnionOperator, Filter
+
 bgp = BGP([
     TriplePattern('?s', '?p1', '?o1'),
     TriplePattern('?s', '?p2', '?o2'),
@@ -133,13 +186,19 @@ query = SPARQLQuery(
     where_clause=bgp
 )
 
-print(query.n_triple_patterns) # print the number of triple patterns in the query
-print(query.count_bgps()) # print the number of bgps in the query
-print(query.get_all_variables()) # print all variables in the query 
-print(query1.projection_variables) # print all variables that are projected
+print('Number of triple patterns:', query.n_triple_patterns) # print the number of triple patterns in the query
+print('Number of BGPs:', query.count_bgps()) # print the number of bgps in the query
+print('Variables:', query.get_all_variables()) # print all variables in the query 
+print('Projection variables:', query.projection_variables) # print all variables that are projected
 
-# Print the structure of the query
-print(query) 
+```
+
+**Output:**
+```
+Number of triple patterns: 3
+Number of BGPs: 1
+Variables: {'?o1', '?o3', '?p3', '?o2', '?p2', '?s', '?p1'}
+Projection variables: ['?s', '?o1', '?o3']
 ```
 
 Parsing SPARQL Queries
@@ -163,21 +222,32 @@ query_str = """
 
 # Parse the query string to a SPARQLQuery object
 query = parser.parse_to_query(query_str)
+# print back the query string from the Query object
+print(query.to_query_string())
+```
+
+**Output:**
+```sparql
+SELECT ?person ?name
+WHERE {
+  ?person :name ?name .
+  ?person :age ?age .
+  FILTER(?age > 25)
+}
 ```
 
 ## Features
 
--  Support for:
+Support for:
   - Basic Graph Patterns (BGP)
   - UNION operations
   - OPTIONAL patterns
   - Filters
-  - Subqueries
   - ORDER BY clauses
   - GROUP BY clauses
   - Aggregation functions (COUNT, SUM, MIN, MAX, AVG)
 - Query isomorphism checking
-- Get query characteristics
+- Query characteristics
 - Query string generation from query object
 
 ## Development
@@ -244,10 +314,14 @@ query = SPARQLQuery(
 # Generate SPARQL query string
 sparql_query = query.to_query_string()
 print(sparql_query)
-# Output:
-# SELECT ?age (COUNT(DISTINCT ?person) AS ?count) (SUM(?salary) AS ?totalSalary)
-# WHERE {
-#   ?person :age ?age .
-#   ?person :salary ?salary .
-# }
-# GROUP BY ?age 
+```
+
+**Output:**
+```sparql
+SELECT ?age (COUNT(DISTINCT ?person) AS ?count) (SUM(?salary) AS ?totalSalary)
+WHERE {
+  ?person :age ?age .
+  ?person :salary ?salary .
+}
+GROUP BY ?age
+``` 
