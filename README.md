@@ -16,15 +16,13 @@ A Python library for crafting, parsing, editing and analyzing SPARQL queries pro
 **SPARQL 1.1 Support Limitations**: Currently, SPARQLSmith only supports a subset of SPARQL 1.1 features focused primarily on SELECT queries. The following features are **not yet implemented**:
 
 - Logical operators (&&, ||) in FILTER expressions
-- ~~Aggregations (GROUP BY, HAVING)~~
-- ~~Aggregation functions (COUNT, SUM, MIN, MAX, AVG, etc.)~~
 - BIND expressions
 - Property paths
 - VALUES clauses
 - CONSTRUCT, ASK, and DESCRIBE query forms
 - Named graphs (FROM, FROM NAMED)
 - SERVICE for federated queries
-- Sub-queries in complex forms
+- Sub-queries
 - OFFSET and LIMIT clauses (partially supported)
 - Support for Turtle syntax in queries
 

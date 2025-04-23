@@ -759,7 +759,7 @@ class SPARQLQuery:
         
         elif isinstance(clause, list):
             for i, subquery in enumerate(clause):
-                result.append(f"{prefix}Item {i+1}:")
+                result.append(f"{prefix}GroupGraphPattern:")
                 subq_lines = self._str_clause(subquery, indent + 2)
                 result.extend(subq_lines)
         
