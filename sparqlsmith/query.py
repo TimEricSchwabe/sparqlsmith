@@ -27,6 +27,21 @@ class TriplePattern:
     subject: str
     predicate: str
     object: str
+    _parent: 'BGP' = None  # Reference to parent BGP
+    
+    def remove(self):
+        """
+        Remove this triple pattern from its parent BGP.
+        
+        Returns
+        -------
+        bool
+            True if removal was successful, False otherwise.
+        """
+        if self._parent is not None and self in self._parent.triples:
+            self._parent.triples.remove(self)
+            return True
+        return False
 
 
 class BGP:
@@ -53,8 +68,17 @@ class BGP:
             A list of filters to initialize the BGP with (default is None).
         """
         self.triples = triples if triples is not None else []
+        # Set parent reference for each triple
+        for triple in self.triples:
+            triple._parent = self
+            
         self.filters = filters if filters is not None else []
-
+        # Set parent reference for each filter
+        for filter in self.filters:
+            filter._parent = self
+            
+        self._parent = None  # Reference to parent query or operator
+        
     def add_triple_pattern(self, subject: str, predicate: str, object: str):
         """
         Add a triple pattern to the BGP.
@@ -69,13 +93,97 @@ class BGP:
             The object of the triple pattern.
         """
         triple = TriplePattern(subject, predicate, object)
+        triple._parent = self
         self.triples.append(triple)
+        
+    def add_filter(self, filter: 'Filter'):
+        """
+        Add a filter to the BGP.
+        
+        Parameters
+        ----------
+        filter : Filter
+            The filter to add.
+        """
+        filter._parent = self
+        self.filters.append(filter)
+        
+    def remove(self):
+        """
+        Remove this BGP from its parent container (query or operator).
+        
+        Returns
+        -------
+        bool
+            True if removal was successful, False otherwise.
+        """
+        if self._parent is None:
+            return False
+            
+        if isinstance(self._parent, SPARQLQuery):
+            if self._parent.where_clause == self:
+                self._parent.where_clause = None
+                return True
+            elif isinstance(self._parent.where_clause, list) and self in self._parent.where_clause:
+                self._parent.where_clause.remove(self)
+                return True
+        elif isinstance(self._parent, OptionalOperator):
+            if self._parent.bgp == self:
+                self._parent.bgp = None
+                self._parent.remove()  # Remove the optional operator as it's no longer valid
+                return True
+        elif isinstance(self._parent, (UnionOperator, GroupGraphPattern)):
+            if self._parent.left == self:
+                self._parent.left = None
+                self._parent.remove()  # Remove the union/group as it's no longer valid
+                return True
+            elif self._parent.right == self:
+                self._parent.right = None
+                self._parent.remove()  # Remove the union/group as it's no longer valid
+                return True
+                
+        return False
 
 
 @dataclass
 class UnionOperator:
     left: Union['BGP', 'OptionalOperator', 'UnionOperator', 'SubQuery']
     right: Union['BGP', 'OptionalOperator', 'UnionOperator', 'SubQuery']
+    _parent = None  # Reference to parent container
+    
+    def __post_init__(self):
+        # Set parent references
+        if hasattr(self.left, '_parent'):
+            self.left._parent = self
+        if hasattr(self.right, '_parent'):
+            self.right._parent = self
+            
+    def remove(self):
+        """
+        Remove this union operator from its parent container.
+        
+        Returns
+        -------
+        bool
+            True if removal was successful, False otherwise.
+        """
+        if self._parent is None:
+            return False
+            
+        if isinstance(self._parent, SPARQLQuery):
+            if self._parent.where_clause == self:
+                self._parent.where_clause = None
+                return True
+            elif isinstance(self._parent.where_clause, list) and self in self._parent.where_clause:
+                self._parent.where_clause.remove(self)
+                return True
+        elif isinstance(self._parent, GroupGraphPattern):
+            if self._parent.pattern == self:
+                self._parent.pattern = None
+                self._parent.remove()  # Remove the group as it's no longer valid
+                return True
+                
+        return False
 
 
 @dataclass
@@ -89,11 +197,72 @@ class OptionalOperator:
         The graph pattern that is optionally matched.
     """
     bgp: Union['BGP', 'UnionOperator', 'SubQuery']
+    _parent = None  # Reference to parent container
+    
+    def __post_init__(self):
+        # Set parent reference
+        if hasattr(self.bgp, '_parent'):
+            self.bgp._parent = self
+            
+    def remove(self):
+        """
+        Remove this optional operator from its parent container.
+        
+        Returns
+        -------
+        bool
+            True if removal was successful, False otherwise.
+        """
+        if self._parent is None:
+            return False
+            
+        if isinstance(self._parent, SPARQLQuery):
+            if self._parent.where_clause == self:
+                self._parent.where_clause = None
+                return True
+            elif isinstance(self._parent.where_clause, list) and self in self._parent.where_clause:
+                self._parent.where_clause.remove(self)
+                return True
+        elif isinstance(self._parent, GroupGraphPattern):
+            if self._parent.pattern == self:
+                self._parent.pattern = None
+                self._parent.remove()  # Remove the group as it's no longer valid
+                return True
+                
+        return False
 
 
 @dataclass
 class Filter:
     expression: str
+    _parent = None  # Reference to parent BGP or query
+    
+    def remove(self):
+        """
+        Remove this filter from its parent container.
+        
+        Returns
+        -------
+        bool
+            True if removal was successful, False otherwise.
+        """
+        if self._parent is None:
+            return False
+            
+        if isinstance(self._parent, BGP):
+            if self in self._parent.filters:
+                self._parent.filters.remove(self)
+                return True
+        elif isinstance(self._parent, SPARQLQuery):
+            if self._parent.filters and self in self._parent.filters:
+                self._parent.filters.remove(self)
+                return True
+        elif isinstance(self._parent, GroupGraphPattern):
+            if self in self._parent.filters:
+                self._parent.filters.remove(self)
+                return True
+                
+        return False
 
 
 @dataclass
@@ -107,22 +276,127 @@ class Having:
         The expression to filter groups after aggregation.
     """
     expression: str
+    _parent = None  # Reference to parent query
+    
+    def remove(self):
+        """
+        Remove this HAVING condition from its parent query.
+        
+        Returns
+        -------
+        bool
+            True if removal was successful, False otherwise.
+        """
+        if self._parent is None:
+            return False
+            
+        if isinstance(self._parent, SPARQLQuery):
+            if self._parent.having and self in self._parent.having:
+                self._parent.having.remove(self)
+                return True
+                
+        return False
 
 
 @dataclass
 class OrderBy:
     variables: List[str]
     ascending: Union[bool, List[bool]] = True
+    _parent = None  # Reference to parent query
+    
+    def remove(self):
+        """
+        Remove this ORDER BY clause from its parent query.
+        
+        Returns
+        -------
+        bool
+            True if removal was successful, False otherwise.
+        """
+        if self._parent is None:
+            return False
+            
+        if isinstance(self._parent, SPARQLQuery):
+            if self._parent.order_by == self:
+                self._parent.order_by = None
+                return True
+                
+        return False
 
 
 @dataclass
 class GroupBy:
     variables: List[str]
+    _parent = None  # Reference to parent query
+    
+    def remove(self):
+        """
+        Remove this GROUP BY clause from its parent query.
+        
+        Returns
+        -------
+        bool
+            True if removal was successful, False otherwise.
+        """
+        if self._parent is None:
+            return False
+            
+        if isinstance(self._parent, SPARQLQuery):
+            if self._parent.group_by == self:
+                self._parent.group_by = None
+                return True
+                
+        return False
 
 
 @dataclass
 class SubQuery:
     query: 'SPARQLQuery'
+    _parent = None  # Reference to parent container
+    
+    def __post_init__(self):
+        self.query._parent = self
+        
+    def remove(self):
+        """
+        Remove this subquery from its parent container.
+        
+        Returns
+        -------
+        bool
+            True if removal was successful, False otherwise.
+        """
+        if self._parent is None:
+            return False
+            
+        if isinstance(self._parent, SPARQLQuery):
+            if self._parent.where_clause == self:
+                self._parent.where_clause = None
+                return True
+            elif isinstance(self._parent.where_clause, list) and self in self._parent.where_clause:
+                self._parent.where_clause.remove(self)
+                return True
+        elif isinstance(self._parent, OptionalOperator):
+            if self._parent.bgp == self:
+                self._parent.bgp = None
+                self._parent.remove()  # Remove the optional operator as it's no longer valid
+                return True
+        elif isinstance(self._parent, UnionOperator):
+            if self._parent.left == self:
+                self._parent.left = None
+                self._parent.remove()  # Remove the union as it's no longer valid
+                return True
+            elif self._parent.right == self:
+                self._parent.right = None
+                self._parent.remove()  # Remove the union as it's no longer valid
+                return True
+        elif isinstance(self._parent, GroupGraphPattern):
+            if self._parent.pattern == self:
+                self._parent.pattern = None
+                self._parent.remove()  # Remove the group as it's no longer valid
+                return True
+                
+        return False
 
 
 @dataclass
@@ -139,6 +413,40 @@ class GroupGraphPattern:
     """
     pattern: Union['BGP', 'UnionOperator', 'OptionalOperator', 'SubQuery', 'GroupGraphPattern']
     filters: List['Filter'] = field(default_factory=list)
+    _parent = None  # Reference to parent container
+    
+    def __post_init__(self):
+        # Set parent references
+        if hasattr(self.pattern, '_parent'):
+            self.pattern._parent = self
+        for filter in self.filters:
+            filter._parent = self
+            
+    def remove(self):
+        """
+        Remove this group graph pattern from its parent container.
+        
+        Returns
+        -------
+        bool
+            True if removal was successful, False otherwise.
+        """
+        if self._parent is None:
+            return False
+            
+        if isinstance(self._parent, SPARQLQuery):
+            if self._parent.where_clause == self:
+                self._parent.where_clause = None
+                return True
+            elif isinstance(self._parent.where_clause, list) and self in self._parent.where_clause:
+                self._parent.where_clause.remove(self)
+                return True
+        elif isinstance(self._parent, GroupGraphPattern):
+            if self._parent.pattern == self:
+                self._parent.pattern = None
+                return True
+                
+        return False
 
 
 @dataclass
@@ -161,6 +469,26 @@ class AggregationExpression:
     variable: str  # Variable or expression to aggregate
     alias: str     # Result variable name (after AS)
     distinct: bool = False
+    _parent = None  # Reference to parent query
+    
+    def remove(self):
+        """
+        Remove this aggregation expression from its parent query.
+        
+        Returns
+        -------
+        bool
+            True if removal was successful, False otherwise.
+        """
+        if self._parent is None:
+            return False
+            
+        if isinstance(self._parent, SPARQLQuery):
+            if self in self._parent.aggregations:
+                self._parent.aggregations.remove(self)
+                return True
+                
+        return False
 
 
 class SPARQLQuery:
@@ -181,16 +509,67 @@ class SPARQLQuery:
 
         self.projection_variables = projection_variables if projection_variables is not None else ['*']
         self.where_clause = where_clause
+        # Set parent reference for each component in where_clause
+        self._set_parent_references(where_clause)
+        
         self.filters = filters
+        # Set parent reference for each filter
+        if self.filters:
+            for filter in self.filters:
+                filter._parent = self
+                
         self.having = having
+        # Set parent reference for each having condition
+        if self.having:
+            for having_cond in self.having:
+                having_cond._parent = self
+                
         self.order_by = order_by
+        if self.order_by:
+            self.order_by._parent = self
+            
         self.group_by = group_by
+        if self.group_by:
+            self.group_by._parent = self
+            
         self.limit = limit
         self.offset = offset
         self.graph = graph
         self.is_distinct = is_distinct
+        
         self.aggregations = aggregations if aggregations is not None else []
+        # Set parent reference for each aggregation
+        for agg in self.aggregations:
+            agg._parent = self
+            
         self.n_triple_patterns = self._count_triple_patterns(where_clause)
+        self._parent = None  # Reference to parent (for subqueries)
+
+    def _set_parent_references(self, clause):
+        """Set parent references for components in the where clause."""
+        if isinstance(clause, (BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern)):
+            clause._parent = self
+            
+            # Recursively set parent references for nested components
+            if isinstance(clause, BGP):
+                for triple in clause.triples:
+                    triple._parent = clause
+                for filter in clause.filters:
+                    filter._parent = clause
+            elif isinstance(clause, UnionOperator):
+                self._set_parent_references(clause.left)
+                self._set_parent_references(clause.right)
+            elif isinstance(clause, OptionalOperator):
+                self._set_parent_references(clause.bgp)
+            elif isinstance(clause, SubQuery):
+                clause.query._parent = clause
+            elif isinstance(clause, GroupGraphPattern):
+                self._set_parent_references(clause.pattern)
+                for filter in clause.filters:
+                    filter._parent = clause
+        elif isinstance(clause, list):
+            for item in clause:
+                self._set_parent_references(item)
 
     def instantiate(self, mapping_dict: Dict[str, str]) -> 'SPARQLQuery':
         """
