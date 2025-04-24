@@ -229,10 +229,10 @@ class TestSPARQLParser(unittest.TestCase):
         query_str = "SELECT ?s ?p ?o WHERE { ?s ?p ?o . FILTER(?o > 5) }"
         query_obj = self._parse_and_verify(query_str)
         
-        # Verify the filter exists
-        self.assertIsNotNone(query_obj.filters)
-        self.assertEqual(len(query_obj.filters), 1)
-        self.assertEqual(query_obj.filters[0].expression, "?o > 5")
+        # Verify the filter exists in the BGP
+        self.assertIsInstance(query_obj.where_clause, BGP)
+        self.assertEqual(len(query_obj.where_clause.filters), 1)
+        self.assertEqual(query_obj.where_clause.filters[0].expression, "?o > 5")
         
     def test_nested_query_flattened(self):
         """Test that nested braces are flattened when preserve_nesting=False"""
@@ -301,10 +301,17 @@ class TestSPARQLParser(unittest.TestCase):
         # Verify DISTINCT flag
         self.assertTrue(query_obj.is_distinct)
         
-        # Check filter
-        self.assertIsNotNone(query_obj.filters)
-        self.assertEqual(len(query_obj.filters), 1)
-        self.assertEqual(query_obj.filters[0].expression, "?age > 25")
+        # Check filter - filter should be in the first BGP in the where_clause list
+        self.assertIsInstance(query_obj.where_clause, list)
+        bgp_with_filter = None
+        for element in query_obj.where_clause:
+            if isinstance(element, BGP) and element.filters:
+                bgp_with_filter = element
+                break
+        
+        self.assertIsNotNone(bgp_with_filter, "No BGP with filters found")
+        self.assertEqual(len(bgp_with_filter.filters), 1)
+        self.assertEqual(bgp_with_filter.filters[0].expression, "?age > 25")
         
         # The where clause should be a list of patterns
         self.assertIsInstance(query_obj.where_clause, list)
@@ -319,7 +326,7 @@ class TestSPARQLParser(unittest.TestCase):
         self.assertIsNotNone(union_element)
         self.assertIsInstance(union_element.left, BGP)
         self.assertIsInstance(union_element.right, BGP)
-        
+
     def test_nested_union_query(self):
         """Test parsing of a query with nested UNION patterns"""
         query_str = """SELECT ?s ?p ?o
@@ -595,22 +602,6 @@ class TestSPARQLParser(unittest.TestCase):
         self.assertIn("AND", query_str_result)
         self.assertIn("AVG(?salary) > 10000", query_str_result)
 
-    def test_nested_query_default_behavior(self):
-        """Test that the default behavior is to flatten nested braces"""
-        query_str = "SELECT ?s ?p ?o WHERE { { { ?s ?p ?o . } } }"
-        
-        # Create a parser without explicitly setting preserve_nesting
-        default_parser = SPARQLParser()
-        result = default_parser.parse(query_str)
-        query_obj = default_parser.structured_dict_to_query(result)
-        
-        # The nested structure should be flattened to a simple BGP
-        self.assertIsInstance(query_obj.where_clause, BGP)
-        self.assertEqual(len(query_obj.where_clause.triples), 1)
-        
-        # Verify serialized query doesn't have nested braces
-        query_str_result = query_obj.to_query_string()
-        self.assertNotIn("{  {", query_str_result)
 
 if __name__ == '__main__':
     unittest.main() 

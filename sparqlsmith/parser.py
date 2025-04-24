@@ -846,7 +846,7 @@ class SPARQLParser:
     
     def structured_dict_to_query(self, structured_dict: Dict) -> SPARQLQuery:
         """
-        Convert a structured dictionary to a SPARQLQuery object.
+        Convert a structured dictionary representation of a SPARQL query to a SPARQLQuery object.
         
         Parameters
         ----------
@@ -891,17 +891,11 @@ class SPARQLParser:
         # For debugging
         logger.debug(f"Converting structured dict: {structured_dict}")
         
-        # Extract filters
+        # Extract top-level filters only
+        # Filters inside patterns will be handled by _build_where_clause
         filters = []
-        # Check if this is a filter at top level
         if 'filter' in structured_dict:
             filters.append(Filter(structured_dict['filter']['expression']))
-        
-        # Check if there are filters in patterns
-        if 'patterns' in structured_dict:
-            for pattern in structured_dict['patterns']:
-                if 'filter' in pattern:
-                    filters.append(Filter(pattern['filter']['expression']))
         
         # Extract HAVING conditions
         having = []
@@ -974,6 +968,7 @@ class SPARQLParser:
         if 'patterns' in structured_dict:
             # Process all BGPs first to combine them
             all_triples = []
+            all_filters = []
             other_patterns = []
             
             for pattern in structured_dict['patterns']:
@@ -984,14 +979,17 @@ class SPARQLParser:
                             predicate=triple_pattern[1],
                             object=triple_pattern[2]
                         ))
+                elif 'filter' in pattern:
+                    # Collect filters associated with this pattern set
+                    all_filters.append(Filter(pattern['filter']['expression']))
                 else:
-                    # Save non-BGP patterns separately
+                    # Save non-BGP, non-filter patterns separately
                     other_patterns.append(pattern)
             
             # If we have BGP triples and other patterns, combine them in the right order
             if all_triples:
-                # First we have a BGP
-                result_parts = [BGP(all_triples)]
+                # First we have a BGP with its associated filters
+                result_parts = [BGP(all_triples, all_filters)]
                 
                 # Then process other patterns in order
                 for pattern in other_patterns:
@@ -1017,6 +1015,10 @@ class SPARQLParser:
                     return result_parts[0]
                 # Otherwise, return the list
                 return result_parts
+            
+            # If we have only filters without BGP, create an empty BGP with the filters
+            if all_filters and not other_patterns:
+                return BGP([], all_filters)
             
             # If we have only other patterns, process them separately
             if other_patterns:
@@ -1059,6 +1061,11 @@ class SPARQLParser:
                             else:
                                 result_parts.append(group_content)
                 
+                # Handle any collected filters 
+                if all_filters:
+                    # If the result is a list, add a BGP with the filters
+                    result_parts.append(BGP([], all_filters))
+                
                 # Return as list
                 return result_parts
         
@@ -1071,7 +1078,13 @@ class SPARQLParser:
                     predicate=triple_pattern[1],
                     object=triple_pattern[2]
                 ))
-            return BGP(triples)
+            
+            # Check if there are filters in the same level
+            filters = []
+            if 'filter' in structured_dict:
+                filters.append(Filter(structured_dict['filter']['expression']))
+                
+            return BGP(triples, filters)
         
         # Handle UNION
         elif 'union' in structured_dict:
@@ -1089,10 +1102,21 @@ class SPARQLParser:
         # Handle Group
         elif 'group' in structured_dict:
             group_content = self._build_where_clause(structured_dict['group'])
+            
+            # Check if there are filters in the same level
+            filters = []
+            if 'filter' in structured_dict:
+                filters.append(Filter(structured_dict['filter']['expression']))
+            
             if self.preserve_nesting:
-                return GroupGraphPattern(pattern=group_content)
+                return GroupGraphPattern(pattern=group_content, filters=filters)
             else:
                 return group_content
+        
+        # Handle standalone filter
+        elif 'filter' in structured_dict:
+            # Create an empty BGP with this filter
+            return BGP([], [Filter(structured_dict['filter']['expression'])])
         
         # Default empty BGP
         return BGP()

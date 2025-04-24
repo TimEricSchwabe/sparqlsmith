@@ -61,14 +61,16 @@ editors_pattern = BGP([
 # Combine with UNION
 union = UnionOperator(left=authors_pattern, right=editors_pattern)
 
-# Add name pattern and filter
+# Name pattern with filter directly associated with the BGP
+name_bgp = BGP(
+    triples=[TriplePattern('?person', '<http://example.org/name>', '?name')],
+    filters=[Filter("REGEX(STR(?name), '^a', 'i')")]
+)
+
+# Create the complete query
 query = SPARQLQuery(
     projection_variables=['?person', '?name'],
-    where_clause=[
-        BGP([TriplePattern('?person', '<http://example.org/name>', '?name')]),
-        union
-    ],
-    filters=[Filter("REGEX(STR(?name), '^A', 'i')")]
+    where_clause=[name_bgp, union]
 )
 
 # Generate SPARQL query string
@@ -80,26 +82,25 @@ print(sparql_query)
 ```bash
 SPARQLQuery:
   Projection: ?person, ?name
-  Filters:
-    REGEX(STR(?name), '^A', 'i')
   Where Clause:
-    GroupGraphPattern:
-      BGP:
-        Triple: ?person <http://example.org/name> ?name
-    GroupGraphPattern:
-      UNION:
-        Left:
-          BGP:
-            Triple: ?person <http://example.org/isAuthorOf> ?book
-            Triple: ?book <http://example.org/type> <http://example.org/Book>
-        Right:
-          BGP:
-            Triple: ?person <http://example.org/isEditorOf> ?journal
-            Triple: ?journal <http://example.org/type> <http://example.org/Journal>
+    BGP:
+      Triple: ?person <http://example.org/name> ?name
+      Filters:
+        REGEX(STR(?name), '^A', 'i')
+    UNION:
+      Left:
+        BGP:
+          Triple: ?person <http://example.org/isAuthorOf> ?book
+          Triple: ?book <http://example.org/type> <http://example.org/Book>
+      Right:
+        BGP:
+          Triple: ?person <http://example.org/isEditorOf> ?journal
+          Triple: ?journal <http://example.org/type> <http://example.org/Journal>
 ----------------------------------------------------------------------------------------------------
 SELECT ?person ?name
 WHERE {
   ?person <http://example.org/name> ?name .
+  FILTER(REGEX(STR(?name), '^A', 'i'))
   {
     ?person <http://example.org/isAuthorOf> ?book .
     ?book <http://example.org/type> <http://example.org/Book> .
@@ -107,7 +108,6 @@ WHERE {
     ?person <http://example.org/isEditorOf> ?journal .
     ?journal <http://example.org/type> <http://example.org/Journal> .
   }
-  FILTER(REGEX(STR(?name), '^A', 'i'))
 }
 ```
 

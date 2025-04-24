@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Union, Dict, Optional, Set
 import copy
 import random
@@ -37,9 +37,11 @@ class BGP:
     ----------
     triples : List[TriplePattern]
         A list of triple patterns that make up the BGP.
+    filters : List['Filter']
+        A list of filters that apply to this BGP.
     """
 
-    def __init__(self, triples: List[TriplePattern] = None):
+    def __init__(self, triples: List[TriplePattern] = None, filters: List['Filter'] = None):
         """
         Initialize a BGP object.
 
@@ -47,8 +49,11 @@ class BGP:
         ----------
         triples : List[TriplePattern], optional
             A list of triple patterns to initialize the BGP with (default is None).
+        filters : List['Filter'], optional
+            A list of filters to initialize the BGP with (default is None).
         """
         self.triples = triples if triples is not None else []
+        self.filters = filters if filters is not None else []
 
     def add_triple_pattern(self, subject: str, predicate: str, object: str):
         """
@@ -129,8 +134,11 @@ class GroupGraphPattern:
     ----------
     pattern : Union[BGP, UnionOperator, OptionalOperator, SubQuery, 'GroupGraphPattern']
         The contained pattern inside the group.
+    filters : List['Filter']
+        A list of filters that apply to this group pattern.
     """
     pattern: Union['BGP', 'UnionOperator', 'OptionalOperator', 'SubQuery', 'GroupGraphPattern']
+    filters: List['Filter'] = field(default_factory=list)
 
 
 @dataclass
@@ -343,6 +351,7 @@ class SPARQLQuery:
             query += f"FROM <{self.graph}>\n"
         query += "WHERE {\n"
         query += self._serialize_where_clause(self.where_clause, 1)
+        # Only include top-level filters (those not associated with any BGP or GroupGraphPattern)
         if self.filters:
             for filter in self.filters:
                 query += f"  FILTER({filter.expression})\n"
@@ -410,6 +419,9 @@ class SPARQLQuery:
         result = ""
         for triple in bgp.triples:
             result += "  " * indent + f"{triple.subject} {triple.predicate} {triple.object} .\n"
+        # Add any filters associated with this BGP
+        for filter in bgp.filters:
+            result += "  " * indent + f"FILTER({filter.expression})\n"
         return result
 
     def _serialize_union(self, union: UnionOperator, indent: int) -> str:
@@ -434,11 +446,13 @@ class SPARQLQuery:
         return f"{'  ' * indent}{{\n{indented_subquery}\n{'  ' * indent}}}\n"
 
     def _serialize_group(self, group: GroupGraphPattern, indent: int) -> str:
-        return (
-                "  " * indent + "{\n" +
-                self._serialize_where_clause(group.pattern, indent + 1) +
-                "  " * indent + "}\n"
-        )
+        result = "  " * indent + "{\n"
+        result += self._serialize_where_clause(group.pattern, indent + 1)
+        # Add any filters associated with this group
+        for filter in group.filters:
+            result += "  " * (indent + 1) + f"FILTER({filter.expression})\n"
+        result += "  " * indent + "}\n"
+        return result
 
     def replace_triple_patterns_with_subqueries(self, limit: int = 300) -> 'SPARQLQuery':
         new_query = copy.deepcopy(self)
@@ -768,6 +782,11 @@ class SPARQLQuery:
             result.append(f"{prefix}BGP:")
             for triple in clause.triples:
                 result.append(f"{prefix}  Triple: {triple.subject} {triple.predicate} {triple.object}")
+            # Add filters associated with this BGP
+            if clause.filters:
+                result.append(f"{prefix}  Filters:")
+                for filter in clause.filters:
+                    result.append(f"{prefix}    {filter.expression}")
         
         elif isinstance(clause, UnionOperator):
             result.append(f"{prefix}UNION:")
@@ -793,6 +812,11 @@ class SPARQLQuery:
             result.append(f"{prefix}GroupGraphPattern:")
             group_lines = self._str_clause(clause.pattern, indent + 2)
             result.extend(group_lines)
+            # Add filters associated with this GroupGraphPattern
+            if clause.filters:
+                result.append(f"{prefix}  Filters:")
+                for filter in clause.filters:
+                    result.append(f"{prefix}    {filter.expression}")
         
         elif isinstance(clause, list):
             for i, subquery in enumerate(clause):
