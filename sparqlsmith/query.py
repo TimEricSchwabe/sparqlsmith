@@ -78,35 +78,57 @@ class BGP:
             filter._parent = self
             
         self._parent = None  # Reference to parent query or operator
-        
-    def add_triple_pattern(self, subject: str, predicate: str, object: str):
+    
+    def add(self, component):
         """
-        Add a triple pattern to the BGP.
-
-        Parameters
-        ----------
-        subject : str
-            The subject of the triple pattern.
-        predicate : str
-            The predicate of the triple pattern.
-        object : str
-            The object of the triple pattern.
-        """
-        triple = TriplePattern(subject, predicate, object)
-        triple._parent = self
-        self.triples.append(triple)
-        
-    def add_filter(self, filter: 'Filter'):
-        """
-        Add a filter to the BGP.
+        Add a component (TriplePattern or Filter) to this BGP.
         
         Parameters
         ----------
-        filter : Filter
-            The filter to add.
+        component : Union[TriplePattern, Filter, str, tuple]
+            Component to add. Can be:
+            - TriplePattern: directly added to triples
+            - Filter: directly added to filters
+            - tuple of (subject, predicate, object): converted to TriplePattern
+            - str: interpreted as a filter expression
+            
+        Returns
+        -------
+        The added component object
+        
+        Raises
+        ------
+        TypeError
+            If the component is not a valid type
         """
-        filter._parent = self
-        self.filters.append(filter)
+        # Handle tuple case (s, p, o)
+        if isinstance(component, tuple) and len(component) == 3:
+            triple = TriplePattern(subject=component[0], predicate=component[1], object=component[2])
+            triple._parent = self
+            self.triples.append(triple)
+            return triple
+            
+        # Handle TriplePattern case
+        elif isinstance(component, TriplePattern):
+            component._parent = self
+            self.triples.append(component)
+            return component
+            
+        # Handle Filter case
+        elif isinstance(component, Filter):
+            component._parent = self
+            self.filters.append(component)
+            return component
+            
+        # Handle string case (filter expression)
+        elif isinstance(component, str):
+            filter = Filter(expression=component)
+            filter._parent = self
+            self.filters.append(filter)
+            return filter
+            
+        else:
+            raise TypeError(f"Cannot add component of type {type(component)} to BGP")
         
     def remove(self):
         """
@@ -304,6 +326,36 @@ class OrderBy:
     ascending: Union[bool, List[bool]] = True
     _parent = None  # Reference to parent query
     
+    def add(self, variable, ascending=True):
+        """
+        Add a variable to the ORDER BY clause.
+        
+        Parameters
+        ----------
+        variable : str
+            The variable to add for ordering
+        ascending : bool, optional
+            Whether to sort in ascending order (default is True)
+            
+        Returns
+        -------
+        self
+            For method chaining
+        """
+        self.variables.append(variable)
+        
+        # Handle the ascending flag
+        if isinstance(self.ascending, bool):
+            # Convert to list if it was a single boolean
+            if len(self.variables) > 1:
+                self.ascending = [self.ascending] * (len(self.variables) - 1)
+                self.ascending.append(ascending)
+        else:
+            # Already a list, just append
+            self.ascending.append(ascending)
+            
+        return self
+    
     def remove(self):
         """
         Remove this ORDER BY clause from its parent query.
@@ -328,6 +380,24 @@ class OrderBy:
 class GroupBy:
     variables: List[str]
     _parent = None  # Reference to parent query
+    
+    def add(self, variable):
+        """
+        Add a variable to the GROUP BY clause.
+        
+        Parameters
+        ----------
+        variable : str
+            The variable to add for grouping
+            
+        Returns
+        -------
+        self
+            For method chaining
+        """
+        if variable not in self.variables:
+            self.variables.append(variable)
+        return self
     
     def remove(self):
         """
@@ -356,6 +426,21 @@ class SubQuery:
     
     def __post_init__(self):
         self.query._parent = self
+    
+    def add(self, component):
+        """
+        Add a component to the subquery's where clause.
+        
+        Parameters
+        ----------
+        component : Union[BGP, UnionOperator, OptionalOperator, GroupGraphPattern, Filter]
+            The component to add to the subquery
+            
+        Returns
+        -------
+        The added component
+        """
+        return self.query.add(component)
         
     def remove(self):
         """
@@ -421,6 +506,48 @@ class GroupGraphPattern:
             self.pattern._parent = self
         for filter in self.filters:
             filter._parent = self
+    
+    def add(self, component):
+        """
+        Add a component to this group graph pattern.
+        
+        Parameters
+        ----------
+        component : Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, Filter, str]
+            The component to add. If a string, it will be treated as a filter expression.
+            
+        Returns
+        -------
+        The added component
+        
+        Raises
+        ------
+        TypeError
+            If the component is not a valid type or if trying to add a pattern when one already exists
+        """
+        # Handle filter case
+        if isinstance(component, Filter):
+            component._parent = self
+            self.filters.append(component)
+            return component
+            
+        # Handle filter expression string
+        elif isinstance(component, str):
+            filter = Filter(expression=component)
+            filter._parent = self
+            self.filters.append(filter)
+            return filter
+            
+        # Handle pattern case
+        elif isinstance(component, (BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern)):
+            if self.pattern is not None:
+                raise TypeError("GroupGraphPattern already has a pattern. Cannot add another one.")
+            self.pattern = component
+            component._parent = self
+            return component
+            
+        else:
+            raise TypeError(f"Cannot add component of type {type(component)} to GroupGraphPattern")
             
     def remove(self):
         """
@@ -570,6 +697,212 @@ class SPARQLQuery:
         elif isinstance(clause, list):
             for item in clause:
                 self._set_parent_references(item)
+    
+    def add(self, component):
+        """
+        Add a component to the query's WHERE clause.
+        
+        Parameters
+        ----------
+        component : Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, Filter, str]
+            The component to add. If a string, it will be treated as a filter expression.
+            
+        Returns
+        -------
+        The added component
+        
+        Raises
+        ------
+        TypeError
+            If the component is not a valid type
+        """
+        # Handle filter case
+        if isinstance(component, Filter):
+            if self.filters is None:
+                self.filters = []
+            component._parent = self
+            self.filters.append(component)
+            return component
+            
+        # Handle filter expression string
+        elif isinstance(component, str) and not isinstance(component, (BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern)):
+            filter = Filter(expression=component)
+            if self.filters is None:
+                self.filters = []
+            filter._parent = self
+            self.filters.append(filter)
+            return filter
+            
+        # Handle other components for where_clause
+        elif isinstance(component, (BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern)):
+            if self.where_clause is None:
+                self.where_clause = component
+                component._parent = self
+            elif isinstance(self.where_clause, list):
+                self.where_clause.append(component)
+                component._parent = self
+            else:
+                # Convert to list if it's not already one
+                self.where_clause = [self.where_clause, component]
+                component._parent = self
+                
+            # Update triple pattern count
+            self.n_triple_patterns = self._count_triple_patterns(self.where_clause)
+            return component
+            
+        else:
+            raise TypeError(f"Cannot add component of type {type(component)} to SPARQLQuery")
+    
+    def add_having(self, expression):
+        """
+        Add a HAVING condition to the query.
+        
+        Parameters
+        ----------
+        expression : Union[Having, str]
+            The HAVING condition to add. If a string, it will be treated as a HAVING expression.
+            
+        Returns
+        -------
+        The added Having object
+        """
+        if self.having is None:
+            self.having = []
+            
+        if isinstance(expression, Having):
+            having = expression
+        else:
+            having = Having(expression=expression)
+            
+        having._parent = self
+        self.having.append(having)
+        return having
+    
+    def add_aggregation(self, aggregation):
+        """
+        Add an aggregation expression to the query.
+        
+        Parameters
+        ----------
+        aggregation : AggregationExpression
+            The aggregation expression to add
+            
+        Returns
+        -------
+        The added aggregation
+        """
+        aggregation._parent = self
+        self.aggregations.append(aggregation)
+        return aggregation
+    
+    def add_group_by(self, variables=None):
+        """
+        Add a GROUP BY clause to the query.
+        
+        Parameters
+        ----------
+        variables : Union[str, List[str]], optional
+            Variable(s) to group by. If None, creates an empty GroupBy.
+            
+        Returns
+        -------
+        The GroupBy object
+        """
+        if isinstance(variables, str):
+            variables = [variables]
+        elif variables is None:
+            variables = []
+            
+        if self.group_by is None:
+            self.group_by = GroupBy(variables=variables)
+            self.group_by._parent = self
+        else:
+            for var in variables:
+                self.group_by.add(var)
+                
+        return self.group_by
+    
+    def add_order_by(self, variables=None, ascending=True):
+        """
+        Add an ORDER BY clause to the query.
+        
+        Parameters
+        ----------
+        variables : Union[str, List[str]], optional
+            Variable(s) to order by. If None, creates an empty OrderBy.
+        ascending : Union[bool, List[bool]], optional
+            Whether to sort in ascending order (default is True)
+            
+        Returns
+        -------
+        The OrderBy object
+        """
+        if isinstance(variables, str):
+            variables = [variables]
+        elif variables is None:
+            variables = []
+            
+        if self.order_by is None:
+            self.order_by = OrderBy(variables=variables, ascending=ascending)
+            self.order_by._parent = self
+        else:
+            if isinstance(variables, list):
+                for i, var in enumerate(variables):
+                    asc = ascending[i] if isinstance(ascending, list) and i < len(ascending) else ascending
+                    self.order_by.add(var, asc)
+                    
+        return self.order_by
+    
+    def set_limit(self, limit):
+        """
+        Set the LIMIT value for the query.
+        
+        Parameters
+        ----------
+        limit : int
+            The limit value
+            
+        Returns
+        -------
+        self
+            For method chaining
+        """
+        self.limit = limit
+        return self
+    
+    def set_offset(self, offset):
+        """
+        Set the OFFSET value for the query.
+        
+        Parameters
+        ----------
+        offset : int
+            The offset value
+            
+        Returns
+        -------
+        self
+            For method chaining
+        """
+        self.offset = offset
+        return self
+    
+    def set_distinct(self, is_distinct=True):
+        """
+        Set the DISTINCT flag for the query.
+        
+        Parameters
+        ----------
+        is_distinct : bool, optional
+            Whether the query should use DISTINCT (default is True)
+            
+        Returns
+        -------
+        self
+            For method chaining
+        """
+        self.is_distinct = is_distinct
+        return self
 
     def instantiate(self, mapping_dict: Dict[str, str]) -> 'SPARQLQuery':
         """

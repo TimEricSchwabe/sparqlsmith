@@ -22,7 +22,7 @@ A Python library for crafting, parsing, editing and analyzing SPARQL queries pro
 - CONSTRUCT, ASK, and DESCRIBE query forms
 - Named graphs (FROM, FROM NAMED)
 - SERVICE for federated queries
-- Sub-queries
+- Sub-queries (not supported in parser)
 - OFFSET and LIMIT clauses (partially supported)
 - Support for Turtle syntax in queries
 
@@ -79,7 +79,7 @@ print(sparql_query)
 ```
 
 **Output:**
-```bash
+```
 SPARQLQuery:
   Projection: ?person, ?name
   Where Clause:
@@ -109,6 +109,85 @@ WHERE {
     ?journal <http://example.org/type> <http://example.org/Journal> .
   }
 }
+```
+
+### Adding and Removing Elements
+
+SPARQLsmith includes a simple API for adding and removing components from queries:
+
+```python
+from sparqlsmith import SPARQLQuery, BGP, TriplePattern, UnionOperator, Filter
+
+# Start with an empty query
+query = SPARQLQuery(projection_variables=["?person", "?name"])
+
+# Create and add a BGP for people
+people_bgp = BGP()
+people_bgp.add(TriplePattern("?person", "<http://example.org/type>", "<http://example.org/Person>")) # add a triple pattern to the BGP
+people_bgp.add(TriplePattern("?person", "<http://example.org/name>", "?name"))
+people_bgp.add(Filter("?person != <http://example.org/excluded>")) # add filters to the BGP
+query.add(people_bgp) # add the BGP to the query
+
+# Adding a UNION operator
+author_bgp = BGP()
+author_bgp.add(("?person", "<http://example.org/isAuthor>", "?true"))
+
+editor_bgp = BGP()
+editor_bgp.add(("?person", "<http://example.org/isEditor>", "?true"))
+
+union = UnionOperator(left=author_bgp, right=editor_bgp)
+query.add(union)
+
+print("COMPLETE QUERY:")
+print(query.to_query_string())
+
+
+print("\nREMOVING A TRIPLE FROM THE PEOPLE BGP:")
+# Removing the first triple of the people BGP
+query.where_clause[0].triples[0].remove() # alternatively, you can also access the underlying BGP directly:people_bgp.triples[0].remove()
+print(query.to_query_string())
+
+print("\nREMOVING THE UNION:")
+query.where_clause[1].remove()
+print(query.to_query_string())
+```
+
+**Output:**
+```
+from sparqlsmith import SPARQLQuery, BGP, TriplePattern, UnionOperator, Filter
+
+# Start with an empty query
+query = SPARQLQuery(projection_variables=["?person", "?name"])
+
+# Create and add a BGP for people
+people_bgp = BGP()
+people_bgp.add(TriplePattern("?person", "<http://example.org/type>", "<http://example.org/Person>")) # add a triple pattern to the BGP
+people_bgp.add(TriplePattern("?person", "<http://example.org/name>", "?name"))
+people_bgp.add(Filter("?person != <http://example.org/excluded>")) # add filters to the BGP
+query.add(people_bgp) # add the BGP to the query
+
+# Adding a UNION operator
+author_bgp = BGP()
+author_bgp.add(("?person", "<http://example.org/isAuthor>", "?true"))
+
+editor_bgp = BGP()
+editor_bgp.add(("?person", "<http://example.org/isEditor>", "?true"))
+
+union = UnionOperator(left=author_bgp, right=editor_bgp)
+query.add(union)
+
+print("COMPLETE QUERY:")
+print(query.to_query_string())
+
+
+print("\nREMOVING A TRIPLE FROM THE PEOPLE BGP:")
+# Removing the first triple of the people BGP
+query.where_clause[0].triples[0].remove() # alternatively, you can also access the underlying BGP directly:people_bgp.triples[0].remove()
+print(query.to_query_string())
+
+print("\nREMOVING THE UNION:")
+query.where_clause[1].remove()
+print(query.to_query_string())
 ```
 
 Checking if queries are isomorphic
