@@ -5,6 +5,8 @@ import random
 import re
 import logging
 from collections import defaultdict
+import networkx as nx
+from .graph_analysis import determine_graph_shape
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -79,6 +81,27 @@ class BGP:
             
         self._parent = None  # Reference to parent query or operator
     
+    def shape(self):
+        """
+        Determine the shape of the graph formed by the triples in this BGP.
+        
+        Possible shapes:
+        - Single-triple: Just one triple pattern
+        - Path: Linear sequence of connected triples
+        - Star: Several triples share a single central node
+        - Snowflake: Multiple stars linked by paths
+        - Tree: Acyclic graph
+        - Cycle: A path whose end connects back to the start
+        - Flower: A stem path with the end having several outgoing paths
+        - Complex: Any other graph structure
+        
+        Returns
+        -------
+        str
+            The shape name as a string
+        """
+        return determine_graph_shape(self.triples)
+        
     def add(self, component):
         """
         Add a component (TriplePattern or Filter) to this BGP.

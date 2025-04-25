@@ -13,7 +13,7 @@ from .query import (
 )
 
 from .parser import SPARQLParser
-
+from .graph_analysis import determine_graph_shape
 __version__ = "0.1.0"
 
 __all__ = [

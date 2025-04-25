@@ -257,19 +257,18 @@ from sparqlsmith import SPARQLQuery, BGP, TriplePattern, UnionOperator, Filter
 bgp = BGP([
     TriplePattern('?s', '?p1', '?o1'),
     TriplePattern('?s', '?p2', '?o2'),
-    TriplePattern('?o1', '?p3', '?o3'),
+    TriplePattern('?s', '?p3', '?o3'),
 ])
 
 query = SPARQLQuery(
     projection_variables=['?s', '?o1', '?o3'],
     where_clause=bgp
 )
-
 print('Number of triple patterns:', query.n_triple_patterns) # print the number of triple patterns in the query
 print('Number of BGPs:', query.count_bgps()) # print the number of bgps in the query
 print('Variables:', query.get_all_variables()) # print all variables in the query 
 print('Projection variables:', query.projection_variables) # print all variables that are projected
-
+print('BGP shape:', bgp.shape()) # print the shape of the BGP in the query
 ```
 
 **Output:**
@@ -278,6 +277,7 @@ Number of triple patterns: 3
 Number of BGPs: 1
 Variables: {'?o1', '?o3', '?p3', '?o2', '?p2', '?s', '?p1'}
 Projection variables: ['?s', '?o1', '?o3']
+BGP shape: Star
 ```
 
 Parsing SPARQL Queries
