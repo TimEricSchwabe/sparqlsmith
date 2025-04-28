@@ -160,6 +160,7 @@ class TestSPARQLQuery(unittest.TestCase):
         query_copy = query.copy(is_distinct=False)
         self.assertFalse(query_copy.is_distinct)
 
+
 class TestSPARQLParser(unittest.TestCase):
     def setUp(self):
         self.parser = SPARQLParser()
@@ -602,6 +603,73 @@ class TestSPARQLParser(unittest.TestCase):
         self.assertIn("AND", query_str_result)
         self.assertIn("AVG(?salary) > 10000", query_str_result)
 
+    def test_prefix_query(self):
+        """Test parsing of a query with PREFIX declarations"""
+        query_str = """
+            PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            
+            SELECT ?name
+            WHERE { 
+                ?person rdf:type foaf:Person .
+                ?person foaf:name ?name .
+            }
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Check that prefixes were extracted
+        self.assertIn('foaf', query_obj.prefixes)
+        self.assertIn('rdf', query_obj.prefixes)
+        self.assertEqual(query_obj.prefixes['foaf'], 'http://xmlns.com/foaf/0.1/')
+        self.assertEqual(query_obj.prefixes['rdf'], 'http://www.w3.org/1999/02/22-rdf-syntax-ns#')
+        
+        # Check serialization includes PREFIX declarations
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("PREFIX foaf: <http://xmlns.com/foaf/0.1/>", query_str_result)
+        self.assertIn("PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>", query_str_result)
+
+
+    def test_prefix_validation(self):
+        """Test validation of PREFIX declarations"""
+        # Create a BGP with prefixed terms
+        bgp = BGP([
+            TriplePattern('?person', 'rdf:type', 'foaf:Person'),
+            TriplePattern('?person', 'foaf:name', '?name')
+        ])
+        
+        # Attempt to create a query with incomplete prefixes - should raise ValueError
+        with self.assertRaises(ValueError):
+            query = SPARQLQuery(
+                projection_variables=['?name'],
+                where_clause=bgp,
+                prefixes={'rdf': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'}
+            )
+            
+        # Create a query with all required prefixes - should succeed
+        query = SPARQLQuery(
+            projection_variables=['?name'],
+            where_clause=bgp,
+            prefixes={
+                'rdf': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
+                'foaf': 'http://xmlns.com/foaf/0.1/'
+            }
+        )
+        
+        # Add a new triple pattern using an undefined prefix
+        new_bgp = BGP([
+            TriplePattern('?person', 'dc:creator', '?creator')
+        ])
+        
+        # Adding this to a new query without the dc prefix should fail
+        with self.assertRaises(ValueError):
+            query = SPARQLQuery(
+                projection_variables=['?creator'],
+                where_clause=new_bgp,
+                prefixes={
+                    'rdf': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
+                    'foaf': 'http://xmlns.com/foaf/0.1/'
+                }
+            )
 
 if __name__ == '__main__':
     unittest.main() 

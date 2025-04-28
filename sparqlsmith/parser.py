@@ -68,6 +68,17 @@ class SPARQLParser:
         string_literal = QuotedString('"') | QuotedString("'")
         numeric_literal = ppc.number
         
+        # Define PREFIX declaration
+        prefix_decl = Group(
+            Suppress(Keyword("PREFIX")) +
+            Word(alphas).setResultsName('prefix') +
+            Suppress(Literal(':')) +
+            full_iri.setResultsName('uri')
+        ).setResultsName('prefix_decl')
+        
+        # Multiple PREFIX declarations
+        prefix_section = ZeroOrMore(prefix_decl).setResultsName('prefixes')
+        
         # 4. Term (variable, IRI, or literal)
         term_s_p = variable | iri
         term_o = variable | iri | string_literal | numeric_literal | boolean_literal
@@ -308,7 +319,7 @@ class SPARQLParser:
         ).setResultsName('having')
         
         # 16. Complete SPARQL query
-        query = select_clause + where_clause + Optional(group_by_clause) + Optional(having_pattern) + Optional(order_by_clause)
+        query = prefix_section + select_clause + where_clause + Optional(group_by_clause) + Optional(having_pattern) + Optional(order_by_clause)
         
         # Save grammar elements as instance variables
         self.variable = variable
@@ -327,6 +338,8 @@ class SPARQLParser:
         self.group_by_clause = group_by_clause
         self.having_pattern = having_pattern
         self.agg_expression = agg_expression
+        self.prefix_decl = prefix_decl
+        self.prefix_section = prefix_section
         self.query = query
     
     def parse(self, query_string: str) -> Dict:
@@ -378,6 +391,14 @@ class SPARQLParser:
             group_by_dict = {}
             having_dict = {}
             aggregations = []
+            prefixes_dict = {}
+            
+            # Handle PREFIX declarations
+            if 'prefixes' in named_keys and result.prefixes:
+                for prefix_decl in result.prefixes:
+                    prefix = prefix_decl.prefix
+                    uri = prefix_decl.uri.strip('<>') # Remove angle brackets
+                    prefixes_dict[prefix] = uri
             
             # Handle SELECT clause
             if 'select' in named_keys:
@@ -501,8 +522,10 @@ class SPARQLParser:
                             filter_dict['expression'] = self._format_filter_expression(result.filter[0])
                         patterns.append({'filter': filter_dict})
                 
-                # Return the ordered patterns with select, group_by, having, and order_by
+                # Return the ordered patterns with select, group_by, having, order_by, and prefixes
                 result_dict = {'patterns': patterns, 'select': select_dict}
+                if prefixes_dict:
+                    result_dict['prefixes'] = prefixes_dict
                 if group_by_dict:
                     result_dict['group_by'] = group_by_dict
                 if having_dict:
@@ -513,6 +536,10 @@ class SPARQLParser:
             
             # Single component case - process as before
             result_dict = {}
+            
+            # Add prefixes if we have them
+            if prefixes_dict:
+                result_dict['prefixes'] = prefixes_dict
             
             if 'bgp' in result:
                 patterns = []
@@ -582,7 +609,6 @@ class SPARQLParser:
             # Return the result dict if we found any named components
             if result_dict:
                 return result_dict
-                return self.flatten_nested_structures(result_dict) #todo
                 
             # If we didn't find any named components but there are list items,
             # check if it looks like a triple pattern
@@ -887,6 +913,11 @@ class SPARQLParser:
                         distinct=agg_dict.get('distinct', False)
                     )
                 )
+        
+        # Extract prefixes if present
+        prefixes = {}
+        if 'prefixes' in structured_dict:
+            prefixes = structured_dict['prefixes']
             
         # For debugging
         logger.debug(f"Converting structured dict: {structured_dict}")
@@ -937,7 +968,7 @@ class SPARQLParser:
         where_clause = self._build_where_clause(structured_dict)
         
         # Create and return the SPARQLQuery
-        return SPARQLQuery(
+        query = SPARQLQuery(
             projection_variables=projection_variables,
             where_clause=where_clause,
             filters=filters if filters else None,
@@ -945,8 +976,11 @@ class SPARQLParser:
             group_by=group_by,
             order_by=order_by,
             is_distinct=is_distinct,
-            aggregations=aggregations if aggregations else None
+            aggregations=aggregations if aggregations else None,
+            prefixes=prefixes
         )
+                
+        return query
     
     def _build_where_clause(self, structured_dict: Dict) -> Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, List]:
         """

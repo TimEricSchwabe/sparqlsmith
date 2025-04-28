@@ -654,7 +654,8 @@ class SPARQLQuery:
             offset: Optional[int] = None,
             graph: Optional[str] = None,
             is_distinct: bool = False,
-            aggregations: List[AggregationExpression] = None
+            aggregations: List[AggregationExpression] = None,
+            prefixes: Dict[str, str] = None
     ):
 
         self.projection_variables = projection_variables if projection_variables is not None else ['*']
@@ -692,8 +693,15 @@ class SPARQLQuery:
         for agg in self.aggregations:
             agg._parent = self
             
+        self.prefixes = prefixes if prefixes is not None else {}
+            
         self.n_triple_patterns = self._count_triple_patterns(where_clause)
         self._parent = None  # Reference to parent (for subqueries)
+        
+        # Validate prefixes automatically during initialization if a where_clause is provided
+        if where_clause is not None and self.prefixes:
+            self.validate_prefixes()
+
 
     def _set_parent_references(self, clause):
         """Set parent references for components in the where clause."""
@@ -1058,6 +1066,14 @@ class SPARQLQuery:
         str
             The SPARQL query string.
         """
+        query = ""
+        
+        # Add PREFIX declarations if present
+        if self.prefixes:
+            for prefix, uri in self.prefixes.items():
+                query += f"PREFIX {prefix}: <{uri}>\n"
+            query += "\n"
+            
         distinct = "DISTINCT " if self.is_distinct else ""
         
         # Handle projection with aggregations
@@ -1080,7 +1096,7 @@ class SPARQLQuery:
         else:
             projection_str = " ".join(self.projection_variables)
             
-        query = f"SELECT {distinct}{projection_str}\n"
+        query += f"SELECT {distinct}{projection_str}\n"
         
         if self.graph:
             query += f"FROM <{self.graph}>\n"
@@ -1419,6 +1435,12 @@ class SPARQLQuery:
         result = []
         result.append("SPARQLQuery:")
         
+        # Print prefixes if present
+        if self.prefixes:
+            result.append("  Prefixes:")
+            for prefix, uri in self.prefixes.items():
+                result.append(f"    {prefix}: <{uri}>")
+        
         # Print projection variables
         distinct_str = "DISTINCT " if self.is_distinct else ""
         
@@ -1575,6 +1597,67 @@ class SPARQLQuery:
             The initial indentation level (default is 0).
         """
         print(self.__str__())
+
+    def add_prefix(self, prefix: str, uri: str) -> 'SPARQLQuery':
+        """
+        Add a prefix declaration to the query.
+        
+        Parameters
+        ----------
+        prefix : str
+            The prefix name (without the colon)
+        uri : str
+            The URI that the prefix maps to (without angle brackets)
+            
+        Returns
+        -------
+        self
+            For method chaining
+        """
+        self.prefixes[prefix] = uri
+        return self
+
+    def validate_prefixes(self) -> bool:
+        """
+        Validate that all prefixes used in the query are defined in the prefixes dictionary.
+        
+        Returns
+        -------
+        bool
+            True if all used prefixes are defined, False otherwise
+            
+        Raises
+        ------
+        ValueError
+            If a prefix is used but not defined in the prefixes dictionary
+        """
+        used_prefixes = set()
+        # Find all used prefixes in the query by scanning through triples
+        triple_patterns = extract_triple_patterns(self)
+        
+        for triple in triple_patterns:
+            for component in [triple.subject, triple.predicate, triple.object]:
+                if component.startswith('<') and component.endswith('>'):
+                    # Full IRI, no prefix used
+                    continue
+                if component.startswith('?'):
+                    # Variable, no prefix used
+                    continue
+                if ":" in component:
+                    # Potential prefixed name
+                    prefix = component.split(':')[0]
+                    if prefix == "":
+                        # Default prefix (:something)
+                        prefix = ""
+                    used_prefixes.add(prefix)
+        
+        # Check if all used prefixes are defined
+        undefined_prefixes = [prefix for prefix in used_prefixes if prefix not in self.prefixes and prefix != ""]
+        
+        if undefined_prefixes:
+            raise ValueError(f"Undefined prefixes used in query: {', '.join(undefined_prefixes)}")
+            
+        return True
 
 
 def extract_triple_patterns(sparql_query: SPARQLQuery) -> List[TriplePattern]:
