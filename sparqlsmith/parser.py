@@ -318,8 +318,22 @@ class SPARQLParser:
             Suppress(Literal(')'))
         ).setResultsName('having')
         
-        # 16. Complete SPARQL query
-        query = prefix_section + select_clause + where_clause + Optional(group_by_clause) + Optional(having_pattern) + Optional(order_by_clause)
+        # Define LIMIT clause
+        limit_clause = (
+            Suppress(Keyword("LIMIT")) + 
+            ppc.integer.setResultsName("limit")
+        ).setResultsName("limit_clause")
+        
+        # Complete query with all clauses including LIMIT
+        query = (
+            prefix_section + 
+            select_clause + 
+            where_clause + 
+            Optional(group_by_clause) + 
+            Optional(having_pattern) + 
+            Optional(order_by_clause) + 
+            Optional(limit_clause)
+        )
         
         # Save grammar elements as instance variables
         self.variable = variable
@@ -340,6 +354,7 @@ class SPARQLParser:
         self.agg_expression = agg_expression
         self.prefix_decl = prefix_decl
         self.prefix_section = prefix_section
+        self.limit_clause = limit_clause
         self.query = query
     
     def parse(self, query_string: str) -> Dict:
@@ -392,6 +407,7 @@ class SPARQLParser:
             having_dict = {}
             aggregations = []
             prefixes_dict = {}
+            limit_value = None
             
             # Handle PREFIX declarations
             if 'prefixes' in named_keys and result.prefixes:
@@ -482,6 +498,10 @@ class SPARQLParser:
                 order_by_dict['variables'] = order_by_vars
                 order_by_dict['ascending'] = ascending_flags
             
+            # Handle LIMIT clause
+            if 'limit_clause' in named_keys and 'limit' in result:
+                limit_value = int(result.limit)
+            
             # If we have braced/optional/union/filter etc., preserve their order
             if len(named_keys) > 1:
                 # Create a patterns list to preserve order
@@ -532,6 +552,8 @@ class SPARQLParser:
                     result_dict['having'] = having_dict
                 if order_by_dict:
                     result_dict['order_by'] = order_by_dict
+                if limit_value is not None:
+                    result_dict['limit'] = limit_value
                 return result_dict
             
             # Single component case - process as before
@@ -605,6 +627,10 @@ class SPARQLParser:
             # Add order_by clause if we have it
             if order_by_dict:
                 result_dict['order_by'] = order_by_dict
+                
+            # Add limit if we have it
+            if limit_value is not None:
+                result_dict['limit'] = limit_value
             
             # Return the result dict if we found any named components
             if result_dict:
@@ -964,6 +990,11 @@ class SPARQLParser:
                     
                 order_by = OrderBy(variables=variables, ascending=ascending)
         
+        # Extract LIMIT
+        limit = None
+        if 'limit' in structured_dict:
+            limit = structured_dict['limit']
+        
         # Build the where clause
         where_clause = self._build_where_clause(structured_dict)
         
@@ -975,6 +1006,7 @@ class SPARQLParser:
             having=having if having else None,
             group_by=group_by,
             order_by=order_by,
+            limit=limit,
             is_distinct=is_distinct,
             aggregations=aggregations if aggregations else None,
             prefixes=prefixes

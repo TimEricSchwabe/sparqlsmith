@@ -603,6 +603,27 @@ class TestSPARQLParser(unittest.TestCase):
         self.assertIn("AND", query_str_result)
         self.assertIn("AVG(?salary) > 10000", query_str_result)
 
+    def test_limit_clause(self):
+        """Test parsing of a query with LIMIT clause"""
+        query_str = """
+            SELECT ?person ?name 
+            WHERE { 
+                ?person ?name ?name .
+                ?person ?age ?age .
+            }
+            LIMIT 10
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Verify the limit attribute exists and has the correct value
+        self.assertIsNotNone(query_obj.limit)
+        self.assertEqual(query_obj.limit, 10)
+        
+        # Check the serialized query contains the LIMIT clause
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("LIMIT 10", query_str_result)
+
+
     def test_prefix_query(self):
         """Test parsing of a query with PREFIX declarations"""
         query_str = """
