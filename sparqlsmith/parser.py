@@ -324,7 +324,13 @@ class SPARQLParser:
             ppc.integer.setResultsName("limit")
         ).setResultsName("limit_clause")
         
-        # Complete query with all clauses including LIMIT
+        # Define OFFSET clause
+        offset_clause = (
+            Suppress(Keyword("OFFSET")) + 
+            ppc.integer.setResultsName("offset")
+        ).setResultsName("offset_clause")
+        
+        # Complete query with all clauses including LIMIT and OFFSET
         query = (
             prefix_section + 
             select_clause + 
@@ -332,7 +338,8 @@ class SPARQLParser:
             Optional(group_by_clause) + 
             Optional(having_pattern) + 
             Optional(order_by_clause) + 
-            Optional(limit_clause)
+            Optional(limit_clause) +
+            Optional(offset_clause)
         )
         
         # Save grammar elements as instance variables
@@ -355,6 +362,7 @@ class SPARQLParser:
         self.prefix_decl = prefix_decl
         self.prefix_section = prefix_section
         self.limit_clause = limit_clause
+        self.offset_clause = offset_clause
         self.query = query
     
     def parse(self, query_string: str) -> Dict:
@@ -408,6 +416,7 @@ class SPARQLParser:
             aggregations = []
             prefixes_dict = {}
             limit_value = None
+            offset_value = None
             
             # Handle PREFIX declarations
             if 'prefixes' in named_keys and result.prefixes:
@@ -502,6 +511,10 @@ class SPARQLParser:
             if 'limit_clause' in named_keys and 'limit' in result:
                 limit_value = int(result.limit)
             
+            # Handle OFFSET clause
+            if 'offset_clause' in named_keys and 'offset' in result:
+                offset_value = int(result.offset)
+            
             # If we have braced/optional/union/filter etc., preserve their order
             if len(named_keys) > 1:
                 # Create a patterns list to preserve order
@@ -554,6 +567,8 @@ class SPARQLParser:
                     result_dict['order_by'] = order_by_dict
                 if limit_value is not None:
                     result_dict['limit'] = limit_value
+                if offset_value is not None:
+                    result_dict['offset'] = offset_value
                 return result_dict
             
             # Single component case - process as before
@@ -631,6 +646,10 @@ class SPARQLParser:
             # Add limit if we have it
             if limit_value is not None:
                 result_dict['limit'] = limit_value
+            
+            # Add offset if we have it
+            if offset_value is not None:
+                result_dict['offset'] = offset_value
             
             # Return the result dict if we found any named components
             if result_dict:
@@ -995,6 +1014,11 @@ class SPARQLParser:
         if 'limit' in structured_dict:
             limit = structured_dict['limit']
         
+        # Extract OFFSET
+        offset = None
+        if 'offset' in structured_dict:
+            offset = structured_dict['offset']
+        
         # Build the where clause
         where_clause = self._build_where_clause(structured_dict)
         
@@ -1007,6 +1031,7 @@ class SPARQLParser:
             group_by=group_by,
             order_by=order_by,
             limit=limit,
+            offset=offset,
             is_distinct=is_distinct,
             aggregations=aggregations if aggregations else None,
             prefixes=prefixes

@@ -624,6 +624,44 @@ class TestSPARQLParser(unittest.TestCase):
         self.assertIn("LIMIT 10", query_str_result)
 
 
+    def test_offset_clause(self):
+        """Test parsing of a query with OFFSET clause"""
+        query_str = """
+            SELECT ?person ?name 
+            WHERE { 
+                ?person :name ?name .
+                ?person :age ?age .
+            }
+            OFFSET 20
+        """
+        query_obj = self._parse_and_verify(query_str)
+        
+        # Verify the offset attribute exists and has the correct value
+        self.assertIsNotNone(query_obj.offset)
+        self.assertEqual(query_obj.offset, 20)
+        
+        # Check the serialized query contains the OFFSET clause
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("OFFSET 20", query_str_result)
+        
+        # Test with combined LIMIT and OFFSET
+        query_str = """
+            SELECT ?person ?name 
+            WHERE { 
+                ?person :name ?name .
+            }
+            LIMIT 50
+            OFFSET 100
+        """
+        query_obj = self._parse_and_verify(query_str)
+        self.assertEqual(query_obj.limit, 50)
+        self.assertEqual(query_obj.offset, 100)
+        
+        # Check serialization includes both clauses
+        query_str_result = query_obj.to_query_string()
+        self.assertIn("LIMIT 50", query_str_result)
+        self.assertIn("OFFSET 100", query_str_result)
+
     def test_prefix_query(self):
         """Test parsing of a query with PREFIX declarations"""
         query_str = """
