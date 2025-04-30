@@ -38,7 +38,7 @@ pip install git+https://github.com/TimEricSchwabe/sparqlsmith.git
 
 ## Quick Start
 
-Building Queries programmatically
+### Building Queries programmatically
 
 ```python
 from sparqlsmith import SPARQLQuery, BGP, TriplePattern, UnionOperator, Filter
@@ -190,25 +190,71 @@ query.where_clause[1].remove()
 print(query.to_query_string())
 ```
 
-Checking if queries are isomorphic
+
+## Query Isomorphism
+
+SPARQLsmith provides a query isomorphism checking feature that determines if two SPARQL queries have the same structure, even with different variable names.
+
+### Mathematical Definition
+
+Formally, two SPARQL where clauses $P_1$ and $P_2$ are isomorphic if there exists a bijective function $f$ between the variables in $P_1$ and $P_2$ such that:
+
+1. If we replace each variable $v$ in $P_1$ with $f(v)$, we obtain a pattern that is structurally identical to $P_2$.
+2. The structure and operators (UNION, OPTIONAL, etc.) are preserved through this mapping.
+
+### Algorithm Implementation
+
+The current implementation uses a backtracking approach to find a consistent variable mapping:
+
+1. For Basic Graph Patterns (BGPs):
+   - For each triple pattern in the first BGP, we attempt to match it with an unused triple pattern in the second BGP.
+   - The variable mappings must be consistent across all matchings.
+
+2. For UNION operators:
+   - We check if either (left₁ ↔ left₂ and right₁ ↔ right₂) or (left₁ ↔ right₂ and right₁ ↔ left₂) are isomorphic.
+   - This accounts for the commutative nature of UNION.
+
+3. For OPTIONAL patterns:
+   - We verify if the contained graph patterns are isomorphic.
+
+### Current Limitations
+
+The current implementation:
+- Focuses on structural isomorphism of patterns, not full semantic equivalence
+- Does not consider query solution modifiers (ORDER BY, LIMIT, etc.) in the isomorphism check
+- Does not fully analyze FILTER expressions (only checks if they exist in the same structural positions)
+- Does not account for differences in projection variables
+
+### Example
+
 ```python
+# These queries are isomorphic despite different variable names and UNION ordering
+from sparqlsmith.parser import SPARQLParser
+from sparqlsmith.query import SPARQLQuery, BGP, TriplePattern, UnionOperator
+
 query1 = SPARQLQuery(
-    projection_variables=['*'],
+    projection_variables=['?s'],
+    prefixes={'ex': '<http://example.com>'},
     where_clause=UnionOperator(
-        left=BGP([TriplePattern('?s', ':type', ':Person')]),
-        right=BGP([TriplePattern('?s', ':type', ':Organization')])
+        left=BGP([TriplePattern('?s', 'ex:p', '?o1')]),
+        right=BGP([TriplePattern('?s', 'ex:q', '?o2')])
     )
 )
 
 query2 = SPARQLQuery(
-    projection_variables=['*'],
+    projection_variables=['?subject'],
+    prefixes={'ex': '<http://example.com>'},
     where_clause=UnionOperator(
-        left=BGP([TriplePattern('?x', ':type', ':Organization')]),
-        right=BGP([TriplePattern('?x', ':type', ':Person')])
+        left=BGP([TriplePattern('?subject', 'ex:q', '?object2')]),
+        right=BGP([TriplePattern('?subject', 'ex:p', '?object1')])
     )
 )
 
-print(query1.is_isomorphic(query2)) 
+# Returns True because the patterns are structurally equivalent
+print(query1.is_isomorphic(query2))
+
+
+exit()
 ```
 
 **Output:**
@@ -216,7 +262,7 @@ print(query1.is_isomorphic(query2))
 True
 ```
 
-Instantiating variables in a query
+### Instantiating variables in a query
 ```python
 bgp = BGP([
     TriplePattern('?s', '?p1', '?o1'),

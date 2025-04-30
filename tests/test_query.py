@@ -5,96 +5,16 @@ from sparqlsmith import (
     TriplePattern,
     UnionOperator,
     OptionalOperator,
+    Filter,
+    GroupGraphPattern,
+    SubQuery,
     extract_triple_patterns
 )
 from sparqlsmith.parser import SPARQLParser
 from sparqlsmith.errors import OrderByValidationError
 from sparqlsmith.query import AggregationExpression
-from sparqlsmith.query import GroupGraphPattern
+
 class TestSPARQLQuery(unittest.TestCase):
-    def test_query_isomorphism_simple_bgp(self):
-        # Test for simple BGP - positive case
-        bgp = BGP([
-            TriplePattern('?s', ':p', '?o'),
-            TriplePattern('?s', '?p2', '?o2')
-        ])
-        query = SPARQLQuery(
-            projection_variables=['?s', '?p', '?o'],
-            where_clause=bgp
-        )
-
-        bgp2 = BGP([
-            TriplePattern('?s1', '?p4', '?o3'),
-            TriplePattern('?s1', ':p', '?o5')
-        ])
-        query2 = SPARQLQuery(
-            projection_variables=['?s', '?p', '?o'],
-            where_clause=bgp2
-        )
-
-        self.assertTrue(query.is_isomorphic(query2))
-
-    def test_query_isomorphism_union(self):
-        query = SPARQLQuery(
-            projection_variables=['*'],
-            where_clause=UnionOperator(
-                left=UnionOperator(
-                    left=BGP([TriplePattern('?s1', '?p1', '?o1')]),
-                    right=BGP([TriplePattern('?o1', '?p2', '?o2')])
-                ),
-                right=BGP([TriplePattern('?s1', ':p22', '?o23')])
-            )
-        )
-        query2 = SPARQLQuery(
-            projection_variables=['*'],
-            where_clause=UnionOperator(
-                left=BGP([TriplePattern('?s11', ':p22', '?o23')]),
-                right=UnionOperator(
-                    left=BGP([TriplePattern('?s11', '?p1', '?o1')]),
-                    right=BGP([TriplePattern('?o1', '?p2', '?o2')])
-                )
-            )
-        )
-
-        self.assertTrue(query.is_isomorphic(query2))
-
-    def test_query_isomorphism_optional(self):
-        # Main BGP
-        main_bgp = BGP([
-            TriplePattern('?s', '?p', '?o')
-        ])
-        # First OPTIONAL
-        optional1 = OptionalOperator(
-            bgp=BGP([
-                TriplePattern('?s', ':p1', '?o2')
-            ])
-        )
-
-        where_clause = [main_bgp, optional1]
-
-        query = SPARQLQuery(
-            projection_variables=['?s'],
-            where_clause=where_clause
-        )
-
-        main_bgp = BGP([
-            TriplePattern('?s2', '?p3', '?o1')
-        ])
-        optional1 = OptionalOperator(
-            bgp=BGP([
-                TriplePattern('?s2', ':p1', '?o2')
-            ])
-        )
-
-        where_clause = [main_bgp, optional1]
-
-        query2 = SPARQLQuery(
-            projection_variables=['?s'],
-            where_clause=where_clause
-        )
-
-        self.assertTrue(query.is_isomorphic(query2))
-
     def test_extract_triple_patterns(self):
         query = SPARQLQuery(
             projection_variables=['*'],
@@ -159,6 +79,326 @@ class TestSPARQLQuery(unittest.TestCase):
         # Test with copy while overriding the is_distinct parameter
         query_copy = query.copy(is_distinct=False)
         self.assertFalse(query_copy.is_distinct)
+
+
+class TestQueryIsomorphism(unittest.TestCase):
+    """Dedicated test class for query isomorphism functionality"""
+    
+    def test_basic_bgp_isomorphism(self):
+        """Test isomorphism with simple BGPs and variable renaming"""
+        query1 = SPARQLQuery(
+            where_clause=BGP([
+                TriplePattern('?s', ':p', '?o'),
+                TriplePattern('?s', '?p2', '?o2')
+            ])
+        )
+        
+        query2 = SPARQLQuery(
+            where_clause=BGP([
+                TriplePattern('?subject', ':p', '?object'),
+                TriplePattern('?subject', '?predicate', '?object2')
+            ])
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query2), 
+            "BGPs with different variable names should be isomorphic")
+
+    def test_bgp_non_isomorphism(self):
+        """Test non-isomorphic BGPs with inconsistent variable mappings"""
+        query1 = SPARQLQuery(
+            where_clause=BGP([
+                TriplePattern('?s', ':p', '?o'),
+                TriplePattern('?s', ':q', '?x')  # Notice the subject is the same as above
+            ])
+        )
+        
+        query2 = SPARQLQuery(
+            where_clause=BGP([
+                TriplePattern('?s', ':p', '?o'),
+                TriplePattern('?t', ':q', '?x')  # Different subject pattern breaks isomorphism
+            ])
+        )
+        
+        self.assertFalse(query1.is_isomorphic(query2),
+            "BGPs with inconsistent variable mappings should not be isomorphic")
+
+    def test_bgp_different_sizes(self):
+        """Test non-isomorphism with different BGP sizes"""
+        query1 = SPARQLQuery(
+            where_clause=BGP([
+                TriplePattern('?s', ':p', '?o')
+            ])
+        )
+        
+        query2 = SPARQLQuery(
+            where_clause=BGP([
+                TriplePattern('?s', ':p', '?o'),
+                TriplePattern('?o', ':q', '?x')
+            ])
+        )
+        
+        self.assertFalse(query1.is_isomorphic(query2),
+            "BGPs with different numbers of triples should not be isomorphic")
+
+    def test_constant_preservation(self):
+        """Test that constants must match exactly in isomorphic queries"""
+        query1 = SPARQLQuery(
+            where_clause=BGP([
+                TriplePattern('?s', ':predicate1', '?o'),
+                TriplePattern('?s', ':predicate2', '"value"')
+            ])
+        )
+        
+        # Same structure but different constant
+        query2 = SPARQLQuery(
+            where_clause=BGP([
+                TriplePattern('?x', ':predicate1', '?y'),
+                TriplePattern('?x', ':predicate2', '"different"')
+            ])
+        )
+        
+        self.assertFalse(query1.is_isomorphic(query2),
+            "Queries with different constants should not be isomorphic")
+        
+        # Same structure with matching constants
+        query3 = SPARQLQuery(
+            where_clause=BGP([
+                TriplePattern('?x', ':predicate1', '?y'),
+                TriplePattern('?x', ':predicate2', '"value"')
+            ])
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query3),
+            "Queries with same constants should be isomorphic")
+
+    def test_union_isomorphism(self):
+        """Test isomorphism with UNION operators"""
+        query1 = SPARQLQuery(
+            where_clause=UnionOperator(
+                left=BGP([TriplePattern('?s', ':p', '?o')]),
+                right=BGP([TriplePattern('?s', ':q', '?o')])
+            )
+        )
+        
+        # Same structure but with operands in opposite order (should be isomorphic due to UNION commutativity)
+        query2 = SPARQLQuery(
+            where_clause=UnionOperator(
+                left=BGP([TriplePattern('?x', ':q', '?y')]),
+                right=BGP([TriplePattern('?x', ':p', '?y')])
+            )
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query2),
+            "Unions with swapped operands should be isomorphic due to commutativity")
+
+    def test_nested_union_isomorphism(self):
+        """Test isomorphism with nested UNION operators"""
+        query1 = SPARQLQuery(
+            where_clause=UnionOperator(
+                left=UnionOperator(
+                    left=BGP([TriplePattern('?s1', '?p1', '?o1')]),
+                    right=BGP([TriplePattern('?o1', '?p2', '?o2')])
+                ),
+                right=BGP([TriplePattern('?s1', ':p22', '?o23')])
+            )
+        )
+        
+        # Same structure with changed variable names and nested UNION flipped 
+        query2 = SPARQLQuery(
+            where_clause=UnionOperator(
+                left=BGP([TriplePattern('?s11', ':p22', '?o23')]),
+                right=UnionOperator(
+                    left=BGP([TriplePattern('?s11', '?p1', '?o1')]),
+                    right=BGP([TriplePattern('?o1', '?p2', '?o2')])
+                )
+            )
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query2),
+            "Nested unions with different structures but equivalent semantics should be isomorphic")
+
+    def test_optional_isomorphism(self):
+        """Test isomorphism with OPTIONAL patterns"""
+        query1 = SPARQLQuery(
+            where_clause=[
+                BGP([TriplePattern('?s', '?p', '?o')]),
+                OptionalOperator(bgp=BGP([TriplePattern('?s', ':p1', '?o2')]))
+            ]
+        )
+        
+        query2 = SPARQLQuery(
+            where_clause=[
+                BGP([TriplePattern('?subject', '?predicate', '?object')]),
+                OptionalOperator(bgp=BGP([TriplePattern('?subject', ':p1', '?object2')]))
+            ]
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query2),
+            "Queries with OPTIONAL patterns should be isomorphic with consistent variable mappings")
+
+    def test_mixed_pattern_isomorphism(self):
+        """Test isomorphism with mixed patterns (BGP, UNION, OPTIONAL)"""
+        # Query with BGP, UNION inside OPTIONAL
+        query1 = SPARQLQuery(
+            where_clause=[
+                BGP([TriplePattern('?s', ':type', ':Person')]),
+                OptionalOperator(
+                    bgp=UnionOperator(
+                        left=BGP([TriplePattern('?s', ':name', '?name')]),
+                        right=BGP([TriplePattern('?s', ':label', '?name')])
+                    )
+                )
+            ]
+        )
+        
+        # Same structure with different variable names
+        query2 = SPARQLQuery(
+            where_clause=[
+                BGP([TriplePattern('?x', ':type', ':Person')]),
+                OptionalOperator(
+                    bgp=UnionOperator(
+                        left=BGP([TriplePattern('?x', ':label', '?y')]),
+                        right=BGP([TriplePattern('?x', ':name', '?y')])
+                    )
+                )
+            ]
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query2),
+            "Complex patterns with mixed operators should be isomorphic with proper variable mapping")
+
+    def test_filter_handling(self):
+        """Test that queries with filters in different places are not isomorphic"""
+        query1 = SPARQLQuery(
+            where_clause=BGP(
+                triples=[
+                    TriplePattern('?s', ':p', '?o')
+                ],
+                filters=[Filter('?o > 10')]
+            )
+        )
+        
+        # Filter with same expression but different variables
+        query2 = SPARQLQuery(
+            where_clause=BGP(
+                triples=[
+                    TriplePattern('?x', ':p', '?y')
+                ],
+                filters=[Filter('?y > 10')]
+            )
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query2),
+            "Queries with filters should be isomorphic if variables are consistently mapped")
+        
+        # Filter with different expression
+        query3 = SPARQLQuery(
+            where_clause=BGP(
+                triples=[
+                    TriplePattern('?x', ':p', '?y')
+                ],
+                filters=[Filter('?y < 5')]
+            )
+        )
+        
+        # Note: Current implementation doesn't compare filter expressions in detail
+        # This test documents current behavior but might need to change if filter comparison is enhanced
+        self.assertTrue(query1.is_isomorphic(query3),
+            "Currently, filter expressions are not compared in detail")
+
+    def test_group_pattern_isomorphism(self):
+        """Test isomorphism with GroupGraphPattern wrappers"""
+        query1 = SPARQLQuery(
+            where_clause=GroupGraphPattern(
+                pattern=BGP([TriplePattern('?s', ':p', '?o')])
+            )
+        )
+        
+        query2 = SPARQLQuery(
+            where_clause=GroupGraphPattern(
+                pattern=BGP([TriplePattern('?x', ':p', '?y')])
+            )
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query2),
+            "Queries with group patterns should be isomorphic if their contents are isomorphic")
+
+    def test_nested_group_pattern_isomorphism(self):
+        """Test isomorphism with nested GroupGraphPattern structures"""
+        query1 = SPARQLQuery(
+            where_clause=GroupGraphPattern(
+                pattern=GroupGraphPattern(
+                    pattern=BGP([TriplePattern('?s', ':p', '?o')])
+                )
+            )
+        )
+        
+        query2 = SPARQLQuery(
+            where_clause=GroupGraphPattern(
+                pattern=GroupGraphPattern(
+                    pattern=BGP([TriplePattern('?x', ':p', '?y')])
+                )
+            )
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query2),
+            "Nested group patterns should be isomorphic if their contents are isomorphic")
+
+    def test_subquery_isomorphism(self):
+        """Test isomorphism with SubQuery components"""
+        subquery1 = SPARQLQuery(
+            projection_variables=['?o'],
+            where_clause=BGP([TriplePattern('?s', ':p', '?o')])
+        )
+        
+        query1 = SPARQLQuery(
+            where_clause=SubQuery(subquery1)
+        )
+        
+        subquery2 = SPARQLQuery(
+            projection_variables=['?obj'],
+            where_clause=BGP([TriplePattern('?subj', ':p', '?obj')])
+        )
+        
+        query2 = SPARQLQuery(
+            where_clause=SubQuery(subquery2)
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query2),
+            "Queries with subqueries should be isomorphic if their subqueries are isomorphic")
+
+    def test_projection_differences(self):
+        """Test that projection variables don't affect isomorphism"""
+        query1 = SPARQLQuery(
+            projection_variables=['?s', '?o'],
+            where_clause=BGP([TriplePattern('?s', ':p', '?o')])
+        )
+        
+        query2 = SPARQLQuery(
+            projection_variables=['?x'],  # Different projection variables
+            where_clause=BGP([TriplePattern('?x', ':p', '?y')])
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query2),
+            "Different projection variables should not affect pattern isomorphism")
+
+    def test_solution_modifiers_not_considered(self):
+        """Test that solution modifiers like ORDER BY don't affect isomorphism"""
+        from sparqlsmith.query import OrderBy
+        
+        query1 = SPARQLQuery(
+            where_clause=BGP([TriplePattern('?s', ':p', '?o')]),
+            order_by=OrderBy(variables=['?o'], ascending=True)
+        )
+        
+        query2 = SPARQLQuery(
+            where_clause=BGP([TriplePattern('?x', ':p', '?y')]),
+            # Different ORDER BY
+            order_by=OrderBy(variables=['?x'], ascending=False) 
+        )
+        
+        self.assertTrue(query1.is_isomorphic(query2),
+            "Solution modifiers should not affect pattern isomorphism")
 
 
 class TestSPARQLParser(unittest.TestCase):
