@@ -13,6 +13,7 @@ from sparqlsmith import (
 from sparqlsmith.parser import SPARQLParser
 from sparqlsmith.errors import OrderByValidationError
 from sparqlsmith.query import AggregationExpression
+from unittest.mock import patch, MagicMock
 
 class TestSPARQLQuery(unittest.TestCase):
     def test_extract_triple_patterns(self):
@@ -969,6 +970,65 @@ class TestSPARQLParser(unittest.TestCase):
                     'foaf': 'http://xmlns.com/foaf/0.1/'
                 }
             )
+
+class TestQueryExecution(unittest.TestCase):
+    """Test the query execution functionality"""
+    
+    @patch('requests.post')
+    def test_run_method(self, mock_post):
+        """Test the run method that executes queries against a SPARQL endpoint"""
+        # Create mock response
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "head": {
+                "vars": ["name", "population"]
+            },
+            "results": {
+                "bindings": [
+                    {
+                        "name": {"type": "literal", "value": "Berlin"},
+                        "population": {"type": "literal", "value": "3645000"}
+                    }
+                ]
+            }
+        }
+        mock_post.return_value = mock_response
+        
+        # Create a simple query
+        query = SPARQLQuery(
+            projection_variables=["?name", "?population"],
+            where_clause=BGP([
+                TriplePattern("?city", "rdf:type", "dbo:City"),
+                TriplePattern("?city", "rdfs:label", "?name"),
+                TriplePattern("?city", "dbo:populationTotal", "?population")
+            ])
+        )
+        
+        # Execute the query against a mock endpoint
+        result = query.run("https://dbpedia.org/sparql")
+        
+        # Verify that post was called with the correct arguments
+        mock_post.assert_called_once()
+        call_args = mock_post.call_args[0][0]
+        self.assertEqual(call_args, "https://dbpedia.org/sparql")
+        
+        # Verify that the content-type and accept headers were set correctly
+        headers = mock_post.call_args[1]["headers"]
+        self.assertEqual(headers["Accept"], "application/sparql-results+json")
+        self.assertEqual(headers["Content-Type"], "application/x-www-form-urlencoded")
+        
+        # Verify the query was properly serialized and sent
+        data = mock_post.call_args[1]["data"]
+        self.assertEqual(list(data.keys())[0], "query")
+        self.assertIn("SELECT ?name ?population", data["query"])
+        
+        # Verify the result was properly returned
+        self.assertEqual(result["head"]["vars"], ["name", "population"])
+        self.assertEqual(len(result["results"]["bindings"]), 1)
+        self.assertEqual(result["results"]["bindings"][0]["name"]["value"], "Berlin")
+        self.assertEqual(result["results"]["bindings"][0]["population"]["value"], "3645000")
+    
 
 if __name__ == '__main__':
     unittest.main() 

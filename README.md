@@ -111,6 +111,8 @@ WHERE {
 }
 ```
 
+
+
 ### Adding and Removing Elements
 
 SPARQLsmith includes a simple API for adding and removing components from queries:
@@ -295,7 +297,7 @@ WHERE {
 }
 ```
 
-Analyzing Query Features
+## Analyzing Query Features
 
 ```python
 from sparqlsmith import SPARQLQuery, BGP, TriplePattern, UnionOperator, Filter
@@ -326,7 +328,7 @@ Projection variables: ['?s', '?o1', '?o3']
 BGP shape: Star
 ```
 
-Parsing SPARQL Queries
+## Parsing SPARQL Queries
 
 ```python
 from sparqlsmith import SPARQLParser
@@ -360,6 +362,52 @@ WHERE {
   FILTER(?age > 25)
 }
 ```
+
+### Executing Queries
+
+You can execute queries directly against SPARQL endpoints using the `run()` method:
+
+```python
+from sparqlsmith import SPARQLQuery, BGP, TriplePattern
+
+# Create a query about Berlin
+query = SPARQLQuery(
+    prefixes={
+        "dbo": "http://dbpedia.org/ontology/",
+        "dbr": "http://dbpedia.org/resource/",
+        "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
+    },
+    projection_variables=["?name", "?population"]
+)
+
+# Add a Basic Graph Pattern
+bgp = BGP([
+    TriplePattern("dbr:Berlin", "rdfs:label", "?name"),
+    TriplePattern("dbr:Berlin", "dbo:populationTotal", "?population")
+])
+
+# Add a filter for English labels
+bgp.add("FILTER(LANG(?name) = 'en')")
+
+query.add(bgp)
+
+# Execute against DBpedia endpoint
+results = query.run("https://dbpedia.org/sparql")
+
+# Process the results
+if "error" in results:
+    print(f"Error: {results['message']}")
+else:
+    bindings = results["results"]["bindings"]
+    for binding in bindings:
+        name = binding["name"]["value"]
+        population = binding["population"]["value"]
+        print(f"City: {name}, Population: {population}")
+```
+
+The `run()` method returns the JSON response from the SPARQL endpoint. If an error occurs, it returns a dict with error information.
+
+
 
 ## Features
 

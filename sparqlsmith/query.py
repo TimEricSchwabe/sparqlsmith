@@ -6,6 +6,7 @@ import re
 import logging
 from collections import defaultdict
 import networkx as nx
+import requests
 from .graph_analysis import determine_graph_shape
 
 # Configure logging
@@ -1658,6 +1659,64 @@ class SPARQLQuery:
             raise ValueError(f"Undefined prefixes used in query: {', '.join(undefined_prefixes)}")
             
         return True
+
+    def run(self, endpoint_url: str, timeout: int = 30) -> Dict:
+        """
+        Execute the SPARQL query against the specified endpoint and return the results.
+        
+        Parameters
+        ----------
+        endpoint_url : str
+            The URL of the SPARQL endpoint to query
+        timeout : int, optional
+            Request timeout in seconds (default is 30)
+            
+        Returns
+        -------
+        Dict
+            The JSON response from the endpoint
+            
+        Raises
+        ------
+        requests.RequestException
+            If there is an issue with the HTTP request
+        """
+        query_string = self.to_query_string()
+        
+        headers = {
+            'Accept': 'application/sparql-results+json',
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        
+        params = {
+            'query': query_string
+        }
+        
+        try:
+            response = requests.post(
+                endpoint_url,
+                headers=headers,
+                data=params,
+                timeout=timeout
+            )
+            
+            # Raise an exception for HTTP errors
+            response.raise_for_status()
+            
+            # Return the JSON response
+            return response.json()
+            
+        except requests.RequestException as e:
+            # Log the error
+            logging.error(f"Error executing SPARQL query: {str(e)}")
+            
+            # Return error information in a structured format
+            return {
+                "error": True,
+                "status_code": getattr(e.response, 'status_code', None),
+                "message": str(e),
+                "query": query_string
+            }
 
 
 def extract_triple_patterns(sparql_query: SPARQLQuery) -> List[TriplePattern]:
