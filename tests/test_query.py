@@ -43,6 +43,62 @@ class TestSPARQLQuery(unittest.TestCase):
             self.assertEqual(tp.predicate, expected_tp.predicate)
             self.assertEqual(tp.object, expected_tp.object)
 
+    def test_variable_instantiation(self):
+        """Test the instantiation of variables with different types of values"""
+        # Create a query with variables
+        bgp = BGP([
+            TriplePattern('?person', '<http://example.org/name>', '?name'),
+            TriplePattern('?person', '<http://example.org/age>', '?age'),
+            TriplePattern('?person', '<http://example.org/homepage>', '?website')
+        ])
+        
+        query = SPARQLQuery(
+            projection_variables=['?person', '?name', '?age', '?website'],
+            where_clause=bgp
+        )
+        
+        # Test 1: Instantiate using keys with '?' prefix
+        instantiated_query = query.copy().instantiate({
+            '?name': '"John Doe"',  # String literal
+            '?age': '42',           # Numeric literal
+            '?website': '<http://example.org/john>'  # URI
+        })
+        
+        # Verify variables in triple patterns are correctly replaced
+        self.assertEqual(instantiated_query.where_clause.triples[0].object, '"John Doe"')
+        self.assertEqual(instantiated_query.where_clause.triples[1].object, '42')
+        self.assertEqual(instantiated_query.where_clause.triples[2].object, '<http://example.org/john>')
+        
+        # Verify projection variables are updated (only non-instantiated variables remain)
+        self.assertEqual(instantiated_query.projection_variables, ['?person'])
+        
+        # Test 2: Instantiate using keys without '?' prefix
+        instantiated_query2 = query.copy().instantiate({
+            'name': '"Jane Doe"',   # String literal
+            'age': '35',            # Numeric literal
+            'website': '<http://example.org/jane>'  # URI
+        })
+        
+        # Verify variables in triple patterns are correctly replaced
+        self.assertEqual(instantiated_query2.where_clause.triples[0].object, '"Jane Doe"')
+        self.assertEqual(instantiated_query2.where_clause.triples[1].object, '35')
+        self.assertEqual(instantiated_query2.where_clause.triples[2].object, '<http://example.org/jane>')
+        
+        # Verify projection variables are updated
+        self.assertEqual(instantiated_query2.projection_variables, ['?person'])
+        
+        # Test 3: Mixed key formats and value types
+        instantiated_query3 = query.copy().instantiate({
+            'name': '"Bob Smith"',        # Without '?' prefix
+            '?age': '28',                 # With '?' prefix
+            'website': 'example.org/bob'  # Value without URI brackets
+        })
+        
+        # Verify variables in triple patterns are correctly replaced
+        self.assertEqual(instantiated_query3.where_clause.triples[0].object, '"Bob Smith"')
+        self.assertEqual(instantiated_query3.where_clause.triples[1].object, '28')
+        self.assertEqual(instantiated_query3.where_clause.triples[2].object, '<example.org/bob>')  # URI brackets added
+
     def test_distinct_query_serialization(self):
         """Test that the is_distinct parameter affects the query string output correctly"""
         # Create a query with is_distinct=True

@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 @dataclass
 class TriplePattern:
     """
-    A class to represent a triple pattern in a SPARQL query.
+    Represents a triple pattern in a SPARQL query.
 
     Attributes
     ----------
@@ -49,7 +49,7 @@ class TriplePattern:
 
 class BGP:
     """
-    A class to represent a Basic Graph Pattern (BGP) in a SPARQL query.
+    Represents a Basic Graph Pattern (BGP) in a SPARQL query.
 
     Attributes
     ----------
@@ -193,6 +193,11 @@ class BGP:
 
 @dataclass
 class UnionOperator:
+    """
+    Represents a UNION operator in a SPARQL query.
+
+    """
+    
     left: Union['BGP', 'OptionalOperator', 'UnionOperator', 'SubQuery']
     right: Union['BGP', 'OptionalOperator', 'UnionOperator', 'SubQuery']
     _parent = None  # Reference to parent container
@@ -235,7 +240,7 @@ class UnionOperator:
 @dataclass
 class OptionalOperator:
     """
-    A class to represent an OPTIONAL pattern in a SPARQL query.
+    Represents an OPTIONAL pattern in a SPARQL query.
 
     Attributes
     ----------
@@ -280,6 +285,14 @@ class OptionalOperator:
 
 @dataclass
 class Filter:
+    """
+    Represents a FILTER expression in a SPARQL query.
+
+    Attributes
+    ----------
+    expression : str
+        The filter expression.
+    """
     expression: str
     _parent = None  # Reference to parent BGP or query
     
@@ -314,7 +327,7 @@ class Filter:
 @dataclass
 class Having:
     """
-    A class to represent a HAVING condition in a SPARQL query.
+    Represents a HAVING condition in a SPARQL query.
     
     Attributes
     ----------
@@ -346,6 +359,15 @@ class Having:
 
 @dataclass
 class OrderBy:
+    """
+    Represents an ORDER BY clause in a SPARQL query.
+
+    Attributes
+    ----------
+    variables: List[str]
+        The variables to order by.
+    """
+
     variables: List[str]
     ascending: Union[bool, List[bool]] = True
     _parent = None  # Reference to parent query
@@ -402,6 +424,14 @@ class OrderBy:
 
 @dataclass
 class GroupBy:
+    """
+    Represents a GROUP BY clause in a SPARQL query.
+
+    Attributes
+    ----------
+    variables: List[str]
+        The variables to group by.
+    """
     variables: List[str]
     _parent = None  # Reference to parent query
     
@@ -445,6 +475,14 @@ class GroupBy:
 
 @dataclass
 class SubQuery:
+    """
+    Represents a subquery in a SPARQL query.
+
+    Attributes
+    ----------
+    query: 'SPARQLQuery'
+        The subquery.
+    """
     query: 'SPARQLQuery'
     _parent = None  # Reference to parent container
     
@@ -511,7 +549,7 @@ class SubQuery:
 @dataclass
 class GroupGraphPattern:
     """
-    A class to represent a nested group graph pattern in a SPARQL query.
+    Represents a nested group graph pattern in a SPARQL query.
 
     Attributes
     ----------
@@ -603,7 +641,7 @@ class GroupGraphPattern:
 @dataclass
 class AggregationExpression:
     """
-    A class to represent an aggregation expression in a SPARQL query.
+    Represents an aggregation expression in a SPARQL query SELECT clause.
     
     Attributes
     ----------
@@ -643,6 +681,40 @@ class AggregationExpression:
 
 
 class SPARQLQuery:
+    """
+    Represents a SPARQL query with all its components.
+    
+    
+    Attributes
+    ----------
+    projection_variables : List[str]
+        Variables to be projected in the SELECT clause.
+    where_clause : Union[BGP, UnionOperator, OptionalOperator, SubQuery, List[SubQuery]]
+        The query pattern in the WHERE clause.
+    filters : List[Filter]
+        FILTER expressions applied to the query.
+    having : List[Having]
+        HAVING conditions for filtering grouped results.
+    order_by : OrderBy
+        Specification for result ordering.
+    group_by : GroupBy
+        Specification for grouping results.
+    limit : int
+        Maximum number of results to return.
+    offset : int
+        Number of results to skip.
+    graph : str
+        Named graph to query against.
+    is_distinct : bool
+        Whether to return only distinct results.
+    aggregations : List[AggregationExpression]
+        Aggregation expressions used in the query.
+    prefixes : Dict[str, str]
+        Namespace prefixes used in the query.
+    n_triple_patterns : int
+        Count of triple patterns in the query.
+    
+    """
     def __init__(
             self,
             projection_variables: List[str] = None,
@@ -1061,10 +1133,17 @@ class SPARQLQuery:
         # After instantiation, remove instantiated variables from projection variables
         if self.projection_variables != ['*']:
             # Keep only variables that were not instantiated
-            self.projection_variables = [
-                var for var in self.projection_variables 
-                if var.startswith('?') and var[1:] not in mapping_dict
-            ]
+            # Check both forms: with and without '?' prefix
+            filtered_vars = []
+            for var in self.projection_variables:
+                if var.startswith('?'):
+                    var_name = var[1:]
+                    if var_name not in mapping_dict and var not in mapping_dict:
+                        filtered_vars.append(var)
+                else:
+                    filtered_vars.append(var)
+            
+            self.projection_variables = filtered_vars
             
             # If all projection variables were instantiated, get all remaining variables
             if not self.projection_variables:
@@ -1135,8 +1214,31 @@ class SPARQLQuery:
     def _replace_variable(self, value: str, mapping_dict: Dict[str, str]) -> str:
         if value.startswith('?'):
             var_name = value[1:]
+            # Check both with and without '?' prefix in the mapping
             if var_name in mapping_dict:
-                return f"<{mapping_dict[var_name]}>"
+                replacement = mapping_dict[var_name]
+                # Don't add angle brackets if the replacement is already a URI or a literal
+                if replacement.startswith('<') and replacement.endswith('>'):
+                    return replacement
+                elif replacement.startswith('"') or replacement.startswith("'"):
+                    return replacement
+                elif replacement.replace('.', '', 1).isdigit():  # Handle numeric literals
+                    return replacement
+                else:
+                    # Default to URI format if not explicitly a literal
+                    return f"<{replacement}>"
+            elif value in mapping_dict:  # Try with the full variable name including '?'
+                replacement = mapping_dict[value]
+                # Don't add angle brackets if the replacement is already a URI or a literal
+                if replacement.startswith('<') and replacement.endswith('>'):
+                    return replacement
+                elif replacement.startswith('"') or replacement.startswith("'"):
+                    return replacement
+                elif replacement.replace('.', '', 1).isdigit():  # Handle numeric literals
+                    return replacement
+                else:
+                    # Default to URI format if not explicitly a literal
+                    return f"<{replacement}>"
         return value
 
     def copy(self, **kwargs) -> 'SPARQLQuery':
