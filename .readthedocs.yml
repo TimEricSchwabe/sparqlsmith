@@ -4,6 +4,10 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.9"
+  jobs:
+    pre_build:
+      # Run sphinx-apidoc to generate module documentation
+      - cd docs && sphinx-apidoc -f -o source/modules ../sparqlsmith
 
 python:
   install:
