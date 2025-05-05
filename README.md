@@ -23,7 +23,6 @@ A Python library for crafting, parsing, editing and analyzing SPARQL queries pro
 - Named graphs (FROM, FROM NAMED)
 - SERVICE for federated queries
 - Sub-queries (not supported in parser)
-- OFFSET and LIMIT clauses (partially supported)
 - Support for Turtle syntax in queries
 
 We're actively working on expanding the supported feature set. Contributions are welcome!

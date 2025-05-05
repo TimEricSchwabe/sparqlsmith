@@ -659,7 +659,7 @@ class SPARQLQuery:
             prefixes: Dict[str, str] = None
     ):
 
-        self.projection_variables = projection_variables if projection_variables is not None else ['*']
+        self._projection_variables = None  # Use property for validation
         self.where_clause = where_clause
         # Set parent reference for each component in where_clause
         self._set_parent_references(where_clause)
@@ -695,6 +695,10 @@ class SPARQLQuery:
             agg._parent = self
             
         self.prefixes = prefixes if prefixes is not None else {}
+        
+        # Now that all attributes are set, we can set projection_variables
+        # which will trigger validation
+        self.projection_variables = projection_variables if projection_variables is not None else ['*']
             
         self.n_triple_patterns = self._count_triple_patterns(where_clause)
         self._parent = None  # Reference to parent (for subqueries)
@@ -703,6 +707,42 @@ class SPARQLQuery:
         if where_clause is not None and self.prefixes:
             self.validate_prefixes()
 
+    @property
+    def projection_variables(self):
+        """Get the projection variables"""
+        return self._projection_variables
+        
+    @projection_variables.setter
+    def projection_variables(self, variables):
+        """
+        Set the projection variables with validation
+        
+        Parameters
+        ----------
+        variables : List[str]
+            List of projection variables
+            
+        Raises
+        ------
+        ValueError
+            If non-aggregated variables in SELECT aren't in GROUP BY when GROUP BY is used
+        """
+        # Store variables
+        self._projection_variables = variables
+        
+        # Skip validation if it's '*' or no GROUP BY
+        if variables == ['*'] or not self.group_by:
+            return
+            
+        # Validate against GROUP BY
+        if self.group_by:
+            # Build a set of aggregation result variables (the aliases)
+            agg_result_vars = {agg.alias for agg in self.aggregations}
+            
+            # Check each projection variable that isn't an aggregation result
+            for var in variables:
+                if var not in agg_result_vars and var not in self.group_by.variables:
+                    raise ValueError(f"Non-aggregated SELECT variable '{var}' must be in GROUP BY")
 
     def _set_parent_references(self, clause):
         """Set parent references for components in the where clause."""
@@ -822,38 +862,101 @@ class SPARQLQuery:
         Returns
         -------
         The added aggregation
+        
+        Raises
+        ------
+        ValueError
+            If the aggregation variable is in the GROUP BY clause
         """
+        # Validate that aggregation variable is not in GROUP BY
+        if self.group_by and aggregation.variable != '*':
+            # Remove '?' prefix for comparison if present
+            agg_var = aggregation.variable[1:] if aggregation.variable.startswith('?') else aggregation.variable
+            
+            # Check if any GROUP BY variable matches
+            for group_var in self.group_by.variables:
+                group_var_name = group_var[1:] if group_var.startswith('?') else group_var
+                if agg_var == group_var_name:
+                    raise ValueError(f"Aggregation variable '{aggregation.variable}' cannot be in GROUP BY")
+        
         aggregation._parent = self
         self.aggregations.append(aggregation)
         return aggregation
     
-    def add_group_by(self, variables=None):
+    def add_group_by(self, variables: Union[str, List[str]] = None, aggregations: Union[AggregationExpression, List[AggregationExpression]] = None):
         """
-        Add a GROUP BY clause to the query.
+        Add a GROUP BY clause to the query along with optional aggregations.
         
         Parameters
         ----------
         variables : Union[str, List[str]], optional
             Variable(s) to group by. If None, creates an empty GroupBy.
+        aggregations : Union[AggregationExpression, List[AggregationExpression]], optional
+            Aggregation(s) to add along with the GROUP BY.
             
         Returns
         -------
-        The GroupBy object
+        self
+            For method chaining
+        
+        Raises
+        ------
+        ValueError
+            If GROUP BY variables are used in aggregations or non-aggregated variables 
+            in SELECT aren't in GROUP BY
         """
+        # Convert variables to list if needed
         if isinstance(variables, str):
             variables = [variables]
         elif variables is None:
             variables = []
             
+        # Convert aggregations to list if needed
+        if aggregations is not None:
+            if isinstance(aggregations, AggregationExpression):
+                aggregations = [aggregations]
+            
+            # Validate each aggregation variable isn't in GROUP BY
+            for agg in aggregations:
+                if agg.variable != '*':
+                    # Remove '?' prefix for comparison if present
+                    agg_var = agg.variable[1:] if agg.variable.startswith('?') else agg.variable
+                    
+                    # Check if any GROUP BY variable matches
+                    for var in variables:
+                        var_name = var[1:] if var.startswith('?') else var
+                        if agg_var == var_name:
+                            raise ValueError(f"Aggregation variable '{agg.variable}' cannot be in GROUP BY")
+        
+        # Set up GROUP BY
         if self.group_by is None:
             self.group_by = GroupBy(variables=variables)
             self.group_by._parent = self
         else:
             for var in variables:
-                self.group_by.add(var)
+                # Skip duplicates
+                if var not in self.group_by.variables:
+                    self.group_by.variables.append(var)
+        
+        # Add aggregations if provided
+        if aggregations:
+            for agg in aggregations:
+                # Set parent reference
+                agg._parent = self
+                self.aggregations.append(agg)
+        
+        # Validate projection variables against GROUP BY (if already set)
+        if self.projection_variables != ['*']:
+            # Build a set of aggregation result variables (the aliases)
+            agg_result_vars = {agg.alias for agg in self.aggregations}
+            
+            # Check each projection variable that isn't an aggregation result
+            for var in self.projection_variables:
+                if var not in agg_result_vars and var not in self.group_by.variables:
+                    raise ValueError(f"Non-aggregated SELECT variable '{var}' must be in GROUP BY")
                 
-        return self.group_by
-    
+        return self
+
     def add_order_by(self, variables=None, ascending=True):
         """
         Add an ORDER BY clause to the query.
@@ -1095,7 +1198,10 @@ class SPARQLQuery:
             
             projection_str = " ".join(projection_parts)
         else:
-            projection_str = " ".join(self.projection_variables)
+            if self.projection_variables != ['*']:
+                projection_str = " ".join(self.projection_variables)
+            else:
+                projection_str = "*"
             
         query += f"SELECT {distinct}{projection_str}\n"
         
@@ -1448,7 +1554,7 @@ class SPARQLQuery:
         projection_parts = []
         # Add regular variables
         if self.projection_variables != ['*']:
-            projection_parts.append(f"{distinct_str}{', '.join(self.projection_variables)}")
+            projection_parts.extend(self.projection_variables)
         else:
             projection_parts.append(f"{distinct_str}*")
         

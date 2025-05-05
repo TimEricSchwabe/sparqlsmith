@@ -109,6 +109,34 @@ print_query_status(query, "AFTER ADDING LIMIT AND OFFSET")
 query.set_distinct(True)
 print_query_status(query, "AFTER SETTING DISTINCT FLAG")
 
+# 12. Demonstrate the new combined GROUP BY and aggregation API
+another_query = SPARQLQuery()
+bgp = BGP()
+bgp.add(("?student", "<http://example.org/attends>", "?class"))
+bgp.add(("?student", "<http://example.org/score>", "?score"))
+another_query.add(bgp)
+
+# Create aggregations
+count_agg = AggregationExpression(
+    function="COUNT",
+    variable="?student",
+    alias="?studentCount", 
+    distinct=True
+)
+
+avg_agg = AggregationExpression(
+    function="AVG",
+    variable="?score",
+    alias="?avgScore"
+)
+
+# Add GROUP BY and aggregations in one call
+another_query.add_group_by("?class", aggregations=[count_agg, avg_agg])
+
+# Set projection variables
+another_query.projection_variables = ["?class", "?studentCount", "?avgScore"]
+
+print_query_status(another_query, "QUERY WITH COMBINED GROUP BY AND AGGREGATIONS")
 
 # 13. Using a group graph pattern
 group = GroupGraphPattern(None)
@@ -117,8 +145,8 @@ inner_bgp.add(("?s", "?p", "?o"))
 group.add(inner_bgp)
 group.add("?p != <http://example.org/exclude>")
 
-another_query = SPARQLQuery()
-another_query.add(group)
-print_query_status(another_query, "QUERY WITH GROUP GRAPH PATTERN")
+query_with_group = SPARQLQuery()
+query_with_group.add(group)
+print_query_status(query_with_group, "QUERY WITH GROUP GRAPH PATTERN")
 
 print("\nAll add examples completed successfully.") 

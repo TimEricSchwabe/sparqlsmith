@@ -844,6 +844,113 @@ class TestSPARQLParser(unittest.TestCase):
         self.assertIn("AND", query_str_result)
         self.assertIn("AVG(?salary) > 10000", query_str_result)
 
+    def test_group_by_aggregation_compatibility(self):
+        """Test GROUP BY and aggregation compatibility validation"""
+        # Valid case: all SELECT vars are either in GROUP BY or aggregation results
+        valid_query = """
+            SELECT ?age (COUNT(?person) AS ?count)
+            WHERE {
+                ?person :name ?name .
+                ?person :age ?age .
+            }
+            GROUP BY ?age
+        """
+        # Should parse successfully
+        query_obj = self._parse_and_verify(valid_query)
+        self.assertEqual(len(query_obj.projection_variables), 1)
+        self.assertIn('?age', query_obj.projection_variables)
+        self.assertEqual(query_obj.group_by.variables, ['?age'])
+        self.assertEqual(len(query_obj.aggregations), 1)
+        
+        # Invalid case 1: SELECT contains variable not in GROUP BY
+        invalid_query1 = """
+            SELECT ?age ?name (COUNT(?person) AS ?count)
+            WHERE {
+                ?person :name ?name .
+                ?person :age ?age .
+            }
+            GROUP BY ?age
+        """
+        with self.assertRaises(ValueError):
+            self._parse_and_verify(invalid_query1)
+            
+        # Invalid case 2: Aggregation on variable in GROUP BY
+        invalid_query2 = """
+            SELECT ?age (COUNT(?age) AS ?ageCount)
+            WHERE {
+                ?person :name ?name .
+                ?person :age ?age .
+            }
+            GROUP BY ?age
+        """
+        with self.assertRaises(OrderByValidationError):
+            self._parse_and_verify(invalid_query2)
+            
+        # Test programmatic construction validation with new combined API
+        query = SPARQLQuery()
+        bgp = BGP([
+            TriplePattern('?person', ':name', '?name'),
+            TriplePattern('?person', ':age', '?age')
+        ])
+        query.add(bgp)
+        
+        # Create an aggregation
+        agg = AggregationExpression(
+            function="COUNT",
+            variable="?person",
+            alias="?count",
+            distinct=False
+        )
+        
+        # Add GROUP BY and aggregation together
+        query.add_group_by('?age', aggregations=agg)
+        query.projection_variables = ['?age', '?count']
+        
+        # This should be valid
+        self.assertEqual(len(query.projection_variables), 2)
+        self.assertIn('?age', query.projection_variables)
+        self.assertIn('?count', query.projection_variables)
+        
+        # Invalid: Try to add a non-aggregated, non-grouped variable to SELECT
+        with self.assertRaises(ValueError):
+            query.projection_variables = ['?age', '?count', '?name']
+            
+        # Invalid: Try to add aggregation on a GROUP BY variable
+        with self.assertRaises(ValueError):
+            invalid_agg = AggregationExpression(
+                function="COUNT",
+                variable="?age",
+                alias="?ageCount",
+                distinct=False
+            )
+            query.add_aggregation(invalid_agg)
+            
+        # Test adding multiple aggregations in one call
+        query2 = SPARQLQuery()
+        query2.add(bgp)
+        
+        agg1 = AggregationExpression(
+            function="COUNT",
+            variable="?person",
+            alias="?personCount",
+            distinct=True
+        )
+        
+        agg2 = AggregationExpression(
+            function="AVG",
+            variable="?name",
+            alias="?avgName",
+            distinct=False
+        )
+        
+        # Add GROUP BY with multiple aggregations
+        query2.add_group_by('?age', aggregations=[agg1, agg2])
+        query2.projection_variables = ['?age', '?personCount', '?avgName']
+        
+        self.assertEqual(len(query2.aggregations), 2)
+        self.assertEqual(query2.aggregations[0].function, "COUNT")
+        self.assertEqual(query2.aggregations[1].function, "AVG")
+
     def test_limit_clause(self):
         """Test parsing of a query with LIMIT clause"""
         query_str = """

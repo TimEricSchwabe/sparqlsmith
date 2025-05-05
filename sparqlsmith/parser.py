@@ -196,7 +196,7 @@ class SPARQLParser:
             Optional(Keyword('DISTINCT').setResultsName('distinct')) +
             (Literal('*').setResultsName('var_star') | variable.setResultsName('variable')) +
             Suppress(Literal(')')) +
-            Suppress(Keyword('AS')) +
+            (Suppress(Keyword('as')) | Suppress(Keyword('AS'))) +  # Make AS case-insensitive
             variable.setResultsName('alias') +
             Suppress(Literal(')'))
         ).setResultsName('aggregation')
@@ -986,12 +986,20 @@ class SPARQLParser:
             variables = structured_dict['group_by']['variables']
             group_by = GroupBy(variables=variables)
             
-            # Validate SELECT variables - only when no aggregations
-            if projection_variables != ['*'] and not aggregations:
-                # If using GROUP BY, all non-aggregated variables in SELECT must be in GROUP BY
-                for var in projection_variables:
-                    if var not in variables:
-                        raise OrderByValidationError(f"Non-group key variable in SELECT: {var}")
+            # Only validate here if we have aggregations
+            # The SPARQLQuery class will validate this when setting projection_variables
+            if aggregations:
+                # Get all variables used in aggregations
+                aggregated_variables = set()
+                for agg in aggregations:
+                    # Skip COUNT(*) since it doesn't refer to a specific variable
+                    if agg.variable != '*':
+                        aggregated_variables.add(agg.variable)
+                
+                # Validate that aggregation variables are not in GROUP BY
+                for agg in aggregations:
+                    if agg.variable != '*' and agg.variable in variables:
+                        raise OrderByValidationError(f"Aggregation variable '{agg.variable}' cannot be in GROUP BY")
         
         # Extract ORDER BY
         order_by = None
@@ -1028,15 +1036,35 @@ class SPARQLParser:
             where_clause=where_clause,
             filters=filters if filters else None,
             having=having if having else None,
-            group_by=group_by,
             order_by=order_by,
             limit=limit,
             offset=offset,
             is_distinct=is_distinct,
-            aggregations=aggregations if aggregations else None,
             prefixes=prefixes
         )
+        
+        # Add GROUP BY and aggregations together if we have them
+        if group_by and aggregations:
+            # Reset aggregations since we'll add them through add_group_by
+            query.aggregations = []
+            query.add_group_by(group_by.variables, aggregations=aggregations)
+        elif group_by:
+            query.add_group_by(group_by.variables)
+        elif aggregations:
+            # If we have aggregations without GROUP BY, just add them
+            for agg in aggregations:
+                query.add_aggregation(agg)
                 
+        # Validate that non-aggregated SELECT variables are in GROUP BY (since we need to have both set first)
+        if group_by and projection_variables != ['*']:
+            # Get all variables used in aggregations
+            aggregated_aliases = {agg.alias for agg in aggregations}
+            
+            # If using GROUP BY, all non-aggregated variables in SELECT must be in GROUP BY
+            for var in projection_variables:
+                if var not in group_by.variables and var not in aggregated_aliases:
+                    raise OrderByValidationError(f"Non-group key variable in SELECT: {var}")
+        
         return query
     
     def _build_where_clause(self, structured_dict: Dict) -> Union[BGP, UnionOperator, OptionalOperator, SubQuery, GroupGraphPattern, List]:
@@ -1226,8 +1254,13 @@ class SPARQLParser:
         SPARQLQuery
             A SPARQLQuery object representing the query.
         """
-        structured_dict = self.parse(query_string)
-        return self.structured_dict_to_query(structured_dict)
+        try:
+            structured_dict = self.parse(query_string)
+            logger.debug(f"Structured dict: {structured_dict}")
+            return self.structured_dict_to_query(structured_dict)
+        except Exception as e:
+            logger.error(f"Error parsing to query: {str(e)}")
+            raise
 
 def debug_parse_results(result, level=0):
     """Print the structure of parse results for debugging."""
