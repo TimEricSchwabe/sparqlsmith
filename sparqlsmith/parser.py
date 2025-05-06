@@ -3,7 +3,7 @@
 from pyparsing import (
     Word, Literal, Group, OneOrMore, QuotedString, Suppress, Forward,
     alphas, alphanums, Combine, CharsNotIn, pyparsing_common as ppc, 
-    ParserElement, ParseResults, Optional, ZeroOrMore, oneOf, Keyword, ParseException
+    ParserElement, ParseResults, Optional, ZeroOrMore, oneOf, Keyword, ParseException, Empty
 )
 import logging
 from typing import Dict, List, Union, Any
@@ -71,7 +71,7 @@ class SPARQLParser:
         # Define PREFIX declaration
         prefix_decl = Group(
             Suppress(Keyword("PREFIX")) +
-            Word(alphas).setResultsName('prefix') +
+            (Word(alphas) | Empty()).setResultsName('prefix') +
             Suppress(Literal(':')) +
             full_iri.setResultsName('uri')
         ).setResultsName('prefix_decl')
