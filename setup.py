@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="sparqlsmith",
-    version="0.1.0",
+    version="0.1.1",
     author="Tim Schwabe",
     author_email="tim.schwabe@tum.de",
     description="A Python library for crafting, manipulating and analyzing SPARQL queries",
@@ -28,7 +28,11 @@ setup(
     ],
     python_requires=">=3.7",
     install_requires=[
-        # Add any dependencies your package needs
+        "pyparsing>=3.0.0",
+        "pytest>=7.0.0",
+        "pytest-cov>=4.0.0",
+        "requests>=2.0.0",
+        "networkx>=3.0.0",
     ],
     extras_require={
         "dev": [
